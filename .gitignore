@@ -1,0 +1,12 @@
+node_modules/
+.shogo/
+dist/
+*.db
+*.db-shm
+*.db-wal
+memory/
+.env
+.jarvis-invite
+.jarvis-keys.json
+.jarvis-secret
+feb4eed3-1438-47bd-9af9-3724da926327/

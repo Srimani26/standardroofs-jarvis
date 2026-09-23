@@ -1,0 +1,170 @@
+// SHOGO:CUSTOM-START prisma-header
+// Managed by Shogo. Do not add a datasource `url` or change the generator `provider` — the database URL is configured in prisma.config.ts (Prisma 7+).
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+// SHOGO:CUSTOM-END
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model AuthUser {
+  id              String   @id @default(cuid())
+  username        String   @unique
+  passwordHash    String   @map("password_hash")
+  twoFactorSecret String?  @map("two_factor_secret")
+  twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
+  failedAttempts  Int      @default(0) @map("failed_attempts")
+  lockedUntil     DateTime? @map("locked_until")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("auth_users")
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  deviceInfo String?  @map("device_info")
+  ipAddress String?  @map("ip_address")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([token])
+  @@map("auth_sessions")
+}
+
+model Habit {
+  id          String   @id @default(cuid())
+  name        String
+  icon        String?
+  color       String?
+  frequency   String   @default("daily")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  completions HabitCompletion[]
+
+  @@map("habits")
+}
+
+model HabitCompletion {
+  id        String   @id @default(cuid())
+  habitId   String   @map("habit_id")
+  date      DateTime @map("completed_at")
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@unique([habitId, date])
+  @@map("habit_completions")
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  title     String?
+  content   String
+  category  String   @default("general")
+  mood      String?
+  tags      String?
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("notes")
+}
+
+model Metric {
+  id        String   @id @default(cuid())
+  name      String
+  value     Float
+  unit      String?
+  category  String   @default("general")
+  date      DateTime @default(now()) @map("recorded_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("metrics")
+}
+
+model Reminder {
+  id        String   @id @default(cuid())
+  title     String
+  message   String?
+  remindAt  DateTime @map("remind_at")
+  completed Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("reminders")
+}
+
+model Memory {
+  id        String   @id @default(cuid())
+  content   String
+  category  String   @default("conversation")
+  importance Int     @default(5)
+  tags      String?
+  metadata  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("memories")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  role      String
+  content   String
+  sessionId String   @map("session_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("conversations")
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  action    String
+  details   String?
+  surface   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([surface])
+  @@map("activity_logs")
+}
+
+model DailySummary {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  summary   String
+  stats     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("daily_summaries")
+}
+
+model UserSession {
+  id          String   @id @default(cuid())
+  deviceType  String?  @map("device_type")
+  deviceName  String?  @map("device_name")
+  ipAddress   String?  @map("ip_address")
+  lastActive  DateTime @default(now()) @map("last_active")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([isActive])
+  @@map("user_sessions")
+}
+
+// End of JARVIS schema — Standard Roofs AI Assistant

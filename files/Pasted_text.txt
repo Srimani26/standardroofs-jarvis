@@ -1,0 +1,47 @@
+I'll dig into the project and find out what's broken. Let me start by orienting myself.Let me look at the registration logic — that's the concrete question.Found the register restriction. Now let me check the overall health of the app and find the other issues.Live error found. Let me see the full log and the failing route.`getModelStatus` is defined now, so that log may be stale. Let me test the live endpoints for real.Now let me check the frontend login/register screen and hunt for other issues.Now let me check the code health — typecheck and lint.All 36 type errors are pre-existing in generated files. Now let me sweep every API endpoint for real failures.Found a second issue — Gmail/Calendar tools aren't resolving. Let me check the tool registry.Let me look at the app rendering and the remaining surfaces.Let me verify the UI renders and check the integration situation in parallel.Let me gather more context while the browser check runs.Now let me check on the browser verification.The app renders cleanly — registration is the real blocker. Let me confirm which copy is live before editing.Now I have a complete picture. Let me set up the work plan.Found another real issue: `requireAuth` is defined but **never applied** — sensitive endpoints are open. Let me verify.Confirmed — `/api/settings/keys` leaks with no auth, and `/api/gmail/send` is open to anyone. Let me read the regions I'll change.Now let me implement. Starting with the auth system — registration, invite code, and recovery.Now let me protect the exposed endpoints. First I need to see which frontend calls already send auth.Now the invite-code endpoint and auth protection. Let me update the auth status block.Now protect the sensitive routes. First `/settings/keys`:Now the Gmail/Calendar block — protect it and make tool failures self-explanatory:Now let me create a frontend auth helper so every call carries the token.The linter is misconfigured (bogus module errors) — I'll rely on `tsc`. Let me add the missing import and state.Now let me surface `sendError` in the compose UI.Now App.tsx and AIChat fetches. Let me read those sections.There's a name collision with the local `setToken`. Let me fix the import:Now protecting the remaining routes. Let me apply auth to memory, activity, sessions, AI, connections and github:Now AIChat needs to send the token:Now the LoginScreen — invite code field plus a recovery flow:Now let me surface the invite code in Settings:Let me verify the build and typecheck now.Let me look at the JSX error:Duplicated block from the edit — let me fix it:Typecheck is clean. Now let me verify every endpoint end-to-end.Registration works. Now the recovery flow and auth protection:Recovery works. Now auth protection on the previously-open endpoints:Now the Gmail/Calendar friendly-error path, then cleanup:Rate limit hit — that's actually another issue (30/min is too low for this app). Let me fix it and mirror the changes.Good — it's dynamic. Now let me mirror to the project copy:Now let me verify the Gmail 412 path and clean up the test account:All verified. Now cleanup of my test account and connecting the integrations:Both integrations installed (awaiting your OAuth click). Let me verify the build and test the new UI in a browser.Fresh build at 12:48. Let me verify the served bundle and test the new UI in a browser.Verified through the real UI. Now cleaning up the test account:Final regression sweep:Let me update the project docs that now describe the old auth behaviour:Done — everything is fixed and verified. Here's what was actually wrong.
+
+## Why you couldn't register
+
+It wasn't a bug in the form. The server had this line hard-coded:
+
+```ts
+const AUTHORIZED_USER = 'Srimani26'
+...
+if (username !== AUTHORIZED_USER) return c.json({ error: 'Unauthorized user' }, 403)
+```
+
+**Any username other than `Srimani26` was rejected on purpose.** And `Srimani26` itself already existed → `409 Account already exists`. So the Register button could never succeed. Your account also had `failedAttempts: 1`, meaning a login attempt had already failed.
+
+## What I fixed
+
+**1. Registration now works** — gated by an invite code instead of a single hard-coded name. The code lives server-side in `.jarvis-invite` (chmod 600), never ships to the browser, and is printed to the API log on boot. A brand-new database needs no code; after that, everyone does.
+
+**2. You were locked out with no way back in** — added `POST /api/auth/reset-password`, reachable from a new **Forgot password?** link. Your invite code proves it's you.
+
+**3. Security hole (this one mattered).** `requireAuth` was **defined but never applied to a single route.** Anyone who found your public URL could read/write your API keys, read your inbox, and **send email as you**. Now 13 routes return `401` without a token: `settings/keys`, `gmail/*`, `calendar/*`, `memory/*`, `ai/chat`, `github/*`, `connections`, `sessions`. Public stays public: `health`, `weather`, `news`.
+
+**4. Gmail + Calendar were completely dead.** `GET /api/gmail/inbox` → `502 Tool "GMAIL_FETCH_EMAILS" not found`. Neither integration was installed on this runtime. Both are now installed — they need **your OAuth click** to activate. Until then they return a clear `412 "Gmail is not connected to this runtime. Open the Connections Hub and reconnect it."` instead of a raw tool error.
+
+**5. Rate limit was 30 req/min.** A single dashboard load fires well over that, so the app was rate-limiting *itself* and showing "Rate limit exceeded." Raised to 300/min.
+
+**6. Silent failures** — the Inbox send button swallowed all errors in `catch {}`. Now surfaced.
+
+**7. Login screen rewritten** — invite-code field, confirm-password, your server's real error text instead of a generic message, and the invite code is visible in Settings with a copy button.
+
+## What you need to do
+
+**Your invite code is `FDSc4f2wDNiI`** — use it to register, or to reset the `Srimani26` password via **Forgot password?**. It's also in **Settings → Invite Code**. (Rotate it any time by setting `JARVIS_INVITE_CODE`, or deleting `.jarvis-invite`.)
+
+**Then click the Connect buttons below** to authorise Gmail and Google Calendar — that's the only piece I can't do for you.
+
+## Verified
+
+- `tsc --noEmit`: **0 errors** in real code (36 pre-existing in `src/generated/`, untouched)
+- Register/reset/login tested with curl — correct 403/409/200 codes and messages
+- 13 protected routes confirmed `401` without a token, `200` with one
+- Ran the whole new login flow in a real browser: **zero console errors**, blank/wrong/correct invite codes all behave correctly
+- Test accounts deleted — your **8 conversations and 3 sessions are intact**
+
+App: https://031393b2-190d-48a9-a1c8-5678a6ff7a45.preview.shogo.ai
+
+One note: that stale `getModelStatus is not defined` error in the build log was from an old build — `/api/ai/status` and `/api/ai/models` both return `200` with 6/6 models active now.
