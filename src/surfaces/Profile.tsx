@@ -108,6 +108,10 @@ export default function Profile({ onLogout }: { onLogout: () => void }) {
 
   const [signingOut, setSigningOut] = useState(false)
   const [signOutMsg, setSignOutMsg] = useState('')
+  const [tfaPw, setTfaPw] = useState('')
+  const [tfaBusy, setTfaBusy] = useState(false)
+  const [tfaError, setTfaError] = useState('')
+  const [tfaMsg, setTfaMsg] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -159,6 +163,27 @@ export default function Profile({ onLogout }: { onLogout: () => void }) {
       setSignOutMsg(err?.message || 'Could not sign out other devices')
     } finally {
       setSigningOut(false)
+    }
+  }
+
+  async function disableTwoFactor() {
+    if (!tfaPw || tfaBusy || !me) return
+    setTfaBusy(true); setTfaError(''); setTfaMsg('')
+    try {
+      const res = await fetch('/api/auth/2fa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: me.user.username, password: tfaPw }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`)
+      setTfaPw('')
+      setTfaMsg(body?.message || 'Two-factor authentication is off.')
+      void load()
+    } catch (err: any) {
+      setTfaError(err?.message || 'Could not turn off 2FA')
+    } finally {
+      setTfaBusy(false)
     }
   }
 
@@ -345,6 +370,58 @@ export default function Profile({ onLogout }: { onLogout: () => void }) {
           <ChevronRight className="w-3 h-3" />
           Add or remove keys in <span className="text-slate-300">Settings</span> (gear icon, top bar).
         </div>
+      </Card>
+
+      {/* Two-factor authentication */}
+      <Card>
+        <SectionTitle
+          icon={<Shield className="w-4 h-4" />}
+          title="Two-factor authentication"
+          hint={me.user.twoFactorEnabled
+            ? 'ON — a 6-digit authenticator code is required at every login.'
+            : 'OFF — your password alone opens J.A.R.V.I.S.'}
+        />
+        {me.user.twoFactorEnabled ? (
+          <div className="space-y-3">
+            <Field
+              label="Confirm your password to turn 2FA off"
+              value={tfaPw}
+              onChange={v => { setTfaPw(v); setTfaError(''); setTfaMsg('') }}
+              placeholder="Account password"
+              show={showPw}
+              onToggle={() => setShowPw(s => !s)}
+            />
+            {tfaError && (
+              <div className="flex items-start gap-2 text-red-400 text-xs">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span className="break-words">{tfaError}</span>
+              </div>
+            )}
+            {tfaMsg && (
+              <div className="flex items-start gap-2 text-emerald-400 text-xs">
+                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span className="break-words">{tfaMsg}</span>
+              </div>
+            )}
+            <button
+              onClick={disableTwoFactor}
+              disabled={!tfaPw || tfaBusy}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-amber-500/40 text-amber-200 hover:bg-amber-500/10 disabled:opacity-40 text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+            >
+              {tfaBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+              Turn off 2FA
+            </button>
+            <p className="text-[11px] text-slate-500">
+              Lost your authenticator app? This is the same recovery you get on the login screen — your password always works.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Nothing to disable right now. To turn it on, complete the 2FA setup shown after your next sign-in.
+            </p>
+          </div>
+        )}
       </Card>
 
       {/* Sign out */}

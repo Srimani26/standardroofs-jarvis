@@ -103,7 +103,18 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
   if (twofaStep === 'verify') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center p-4">
-        <TwoFactorVerify username={username} onSuccess={(token) => onLogin(token, username)} onBack={() => { setTwofaStep('none'); setTempToken('') }} />
+        <TwoFactorVerify
+          username={username}
+          tempToken={tempToken}
+          onSuccess={(token) => onLogin(token, username)}
+          onBack={() => { setTwofaStep('none'); setTempToken('') }}
+          onRecovered={(message) => {
+            setTwofaStep('none')
+            setTempToken('')
+            setMode('login')
+            setNotice(message)
+          }}
+        />
       </div>
     )
   }

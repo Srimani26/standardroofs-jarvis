@@ -378,6 +378,31 @@ app.post('/auth/2fa/verify-login', async (c) => {
 })
 
 // POST /api/auth/change-password
+// POST /api/auth/2fa/disable — recovery path. Proving the password is enough to
+// turn 2FA off, so losing the authenticator app can never lock Sri out of his own
+// J.A.R.V.I.S. again.
+app.post('/auth/2fa/disable', async (c) => {
+  const body = await c.req.json()
+  const { username, password } = body
+  if (!username || !password) return c.json({ error: 'Username and password required' }, 400)
+
+  const user = await (prisma as any).authUser.findUnique({ where: { username } })
+  if (!user) return c.json({ error: 'Invalid credentials' }, 401)
+
+  const valid = await bcrypt.compare(password, user.passwordHash)
+  if (!valid) return c.json({ error: 'Incorrect password' }, 401)
+
+  await (prisma as any).authUser.update({
+    where: { id: user.id },
+    data: { twoFactorEnabled: false, twoFactorSecret: null },
+  })
+  await (prisma as any).activityLog.create({
+    data: { action: '2fa_disable', details: 'Two-factor authentication turned off', surface: 'security' },
+  }).catch(() => {})
+
+  return c.json({ ok: true, message: 'Two-factor authentication is off. Log in with your password.' })
+})
+
 app.post('/auth/change-password', requireAuth, async (c) => {
   const body = await c.req.json()
   const { currentPassword, newPassword } = body
