@@ -203,7 +203,9 @@ export default function App() {
   const [newKey, setNewKey] = useState('')
   const [keyMsg, setKeyMsg] = useState('')
   const [keyBusy, setKeyBusy] = useState(false)
-  const [authenticated, setAuthenticated] = useState(false)
+  const [authenticated, setAuthenticated] = useState(() =>
+    typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('jarvis_token'))
+  )
   const [inviteCode, setInviteCode] = useState('')
 
   const loadProviders = useCallback(() => {
@@ -254,26 +256,33 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (token) {
-      fetch('/api/auth/status', { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => {
-          if (!d.authenticated) {
-            localStorage.removeItem('jarvis_token')
-            localStorage.removeItem('jarvis_user')
-            setToken('')
-            setUsername('')
-            setAuthenticated(false)
-          }
-        })
-        .catch(() => {
+    if (!token) return
+    let cancelled = false
+    const keepSession = (name?: string) => {
+      if (cancelled) return
+      setAuthenticated(true)
+      setUsername(u => u || name || localStorage.getItem('jarvis_user') || '')
+    }
+    fetch('/api/auth/status', { headers: { Authorization: `Bearer ${token}` } })
+      .then(async r => ({ ok: r.ok, body: (await r.json().catch(() => ({}))) as { authenticated?: boolean; username?: string } }))
+      .then(({ ok, body }) => {
+        if (cancelled) return
+        // The server explicitly rejected the token — clear it.
+        if (ok && body.authenticated === false) {
           localStorage.removeItem('jarvis_token')
           localStorage.removeItem('jarvis_user')
           setToken('')
           setUsername('')
           setAuthenticated(false)
-        })
-    }
+          return
+        }
+        // Anything unexpected (5xx, server restarting) keeps the session.
+        // Nothing else ever set this true, so clearing here used to bounce
+        // Sri straight back to the login screen on every reload.
+        keepSession(body.username)
+      })
+      .catch(() => keepSession())
+    return () => { cancelled = true }
   }, [])
 
   const handleLogin = (newToken: string, user: string) => {
