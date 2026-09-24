@@ -378,13 +378,15 @@ app.post('/auth/2fa/verify-login', async (c) => {
 })
 
 // POST /api/auth/change-password
-app.post('/auth/change-password', async (c) => {
+app.post('/auth/change-password', requireAuth, async (c) => {
   const body = await c.req.json()
-  const { username, currentPassword, newPassword } = body
+  const { currentPassword, newPassword } = body
+  const userId = c.get('userId') as string
   if (!currentPassword || !newPassword) return c.json({ error: 'Current and new password required' }, 400)
   if (newPassword.length < 6) return c.json({ error: 'New password must be at least 6 characters' }, 400)
+  if (newPassword === currentPassword) return c.json({ error: 'New password must be different from the current one' }, 400)
 
-  const user = await (prisma as any).authUser.findUnique({ where: { username } })
+  const user = await (prisma as any).authUser.findUnique({ where: { id: userId } })
   if (!user) return c.json({ error: 'User not found' }, 404)
 
   const valid = await bcrypt.compare(currentPassword, user.passwordHash)
@@ -392,10 +394,15 @@ app.post('/auth/change-password', async (c) => {
 
   const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
   await (prisma as any).authUser.update({ where: { id: user.id }, data: { passwordHash: newHash } })
-  await (prisma as any).authSession.deleteMany({ where: { userId: user.id } })
-  await (prisma as any).activityLog.create({ data: { action: 'password_change', details: 'Password changed', surface: 'security' } })
 
-  return c.json({ ok: true, message: 'Password changed. All other sessions invalidated.' })
+  // Keep the session Sri is changing the password from and sign out every other
+  // device. Wiping them all used to log him straight back out.
+  const authHeader = c.req.header('Authorization') || ''
+  const currentToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  await (prisma as any).authSession.deleteMany({ where: { userId: user.id, token: { not: currentToken } } }).catch(() => {})
+  await (prisma as any).activityLog.create({ data: { action: 'password_change', details: 'Password changed', surface: 'security' } }).catch(() => {})
+
+  return c.json({ ok: true, message: 'Password changed. All other devices were signed out.' })
 })
 
 // POST /api/auth/logout
@@ -423,6 +430,58 @@ app.get('/auth/status', (c) => {
 // GET /api/auth/invite-code — owner-only, so Sri can find the code in-app
 app.get('/auth/invite-code', requireAuth, (c) => c.json({ inviteCode: INVITE_CODE }))
 
+// GET /api/auth/me — one call for the whole Profile surface
+app.get('/auth/me', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const authHeader = c.req.header('Authorization') || ''
+  const currentToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+
+  const user = await (prisma as any).authUser.findUnique({ where: { id: userId } })
+  if (!user) return c.json({ error: 'User not found' }, 404)
+
+  const [sessions, conversations, memories, notes, activities] = await Promise.all([
+    (prisma as any).authSession.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 25 }).catch(() => []),
+    (prisma as any).conversation.count().catch(() => 0),
+    (prisma as any).memory.count().catch(() => 0),
+    (prisma as any).note.count().catch(() => 0),
+    (prisma as any).activityLog.count().catch(() => 0),
+  ])
+  const keys = loadKeys()
+
+  return c.json({
+    user: {
+      username: user.username,
+      createdAt: user.createdAt,
+      twoFactorEnabled: Boolean(user.twoFactorEnabled),
+      failedAttempts: user.failedAttempts,
+    },
+    sessions: sessions.map((s: any) => ({
+      id: s.id,
+      deviceInfo: s.deviceInfo || 'unknown device',
+      ipAddress: s.ipAddress || null,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      current: s.token === currentToken,
+    })),
+    providers: [
+      { id: 'openai', name: 'OpenAI', configured: Boolean(keys.openai) },
+      { id: 'anthropic', name: 'Anthropic', configured: Boolean(keys.anthropic) },
+      { id: 'gemini', name: 'Gemini', configured: Boolean(keys.gemini) },
+    ],
+    stats: { conversations, memories, notes, activities },
+  })
+})
+
+// POST /api/auth/logout-others — sign out every device except this one
+app.post('/auth/logout-others', requireAuth, async (c) => {
+  const userId = c.get('userId') as string
+  const authHeader = c.req.header('Authorization') || ''
+  const currentToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const res = await (prisma as any).authSession.deleteMany({ where: { userId, token: { not: currentToken } } })
+  await (prisma as any).activityLog.create({ data: { action: 'logout_others', details: `Signed out ${res.count} device(s)`, surface: 'security' } }).catch(() => {})
+  return c.json({ ok: true, signedOut: res.count })
+})
+
 // ═══════════════════════════════════════════════════════════════════
 // AI ENGINE — MoA (Mixture of Agents) + Live Context
 // ═══════════════════════════════════════════════════════════════════
@@ -443,7 +502,21 @@ const JARVIS_SYSTEM_PROMPT = `You are J.A.R.V.I.S. — an advanced AI command ce
 - Building: Sri AI Business OS (SaaS platform, ~92% complete)
 - Skills: Python, JavaScript, TypeScript, Deluge (Zoho), Google Apps Script, n8n
 - Tools: Gemini AI, GPT-4o, Claude, Google Ads API, Zoho CRM, Shopify
-- GitHub: github.com/Srimani26/Sri-AI-Business-OS
+ - GitHub: github.com/Srimani26/Sri-AI-Business-OS
+- Build environment: VS Code + Antigravity (he builds and redesigns websites with AI assistance)
+- Runs a live Shopify store for the business
+
+## HOW SRI MAKES MONEY — this is the mission
+Sri converts manual, human-run business processes into AI automation. He removes
+hours of repetitive work from a business and sells that saved time back as value.
+He uses AI to: (a) run his own companies smoothly, (b) generate revenue directly,
+and (c) ship automation as a product to clients. Aim every answer at that result:
+fewer manual steps, more automation, more revenue, less wasted time.
+- Default instinct: "can this be automated?" — and if yes, say exactly how.
+- When Sri describes a repetitive task, propose the concrete automation
+  (trigger -> steps -> tools -> output) and estimate the hours per week it saves.
+- When he asks about a website, assume VS Code + Antigravity and a Shopify store
+  are in play.
 
 ## Sri's Active Projects
 1. Zoho CRM Quotation Automation (85%) — Deluge, Zoho Writer PDF
@@ -466,6 +539,17 @@ const JARVIS_SYSTEM_PROMPT = `You are J.A.R.V.I.S. — an advanced AI command ce
 - Project management — track progress, plan sprints, break down tasks
 - Data analysis — analyze metrics, generate reports, visualize data
 - Website design — Shopify, React, HTML/CSS, responsive design
+
+
+## NEVER BE GENERIC — this is a production tool, not a demo
+- Sri has explicitly rejected generic, filler, demoTM-grade answers. Do not produce them.
+- Banned: "As an AI language model...", "It depends" with no answer, restating his
+  question, disclaimers, hedging, "consult a professional", empty encouragement.
+- Every reply must contain something usable: working code, a concrete plan, a number,
+  a decision, or a specific next action.
+- If you truly lack information, name exactly what is missing and how to obtain it.
+- Never invent file paths, numbers, prices, API results, or citations. Say "I don't
+  know" rather than guess.
 
 ## RESPONSE RULES
 1. ALWAYS address Sri as "Master" at least once per response
@@ -639,16 +723,20 @@ async function callDirectGemini(key: string, system: string, messages: any[]): P
   return text
 }
 
-async function callAI(systemPrompt: string, messages: Array<{ role: string; content: string }>): Promise<{ text: string; source: string }> {
+async function callAI(systemPrompt: string, messages: Array<{ role: string; content: string }>, preferredModelId?: string): Promise<{ text: string; source: string }> {
   const errors: string[] = []
   const chatMessages = messages.map(m => ({ role: m.role, content: m.content }))
 
   // 1) Shogo gateway (pod-native, no key required)
   const llmProvider = createLlmProvider()
   if (llmProvider) {
-    const readyModels = MODEL_CHAIN.filter(isModelReady)
-    if (readyModels.length === 0) readyModels.push([...MODEL_CHAIN].sort((a, b) => a.lastFailAt - b.lastFailAt)[0])
-    for (const model of readyModels) {
+    // An explicitly picked model is tried first, even if it is cooling down —
+    // Sri asked for it by name. Everything else stays as the failover chain.
+    const preferred = preferredModelId ? MODEL_CHAIN.filter(m => m.id === preferredModelId) : []
+    const fallbacks = MODEL_CHAIN.filter(m => m.id !== preferredModelId && isModelReady(m))
+    const ordered = [...preferred, ...fallbacks]
+    if (ordered.length === 0) ordered.push([...MODEL_CHAIN].sort((a, b) => a.lastFailAt - b.lastFailAt)[0])
+    for (const model of ordered) {
       try {
         const result = await generateText({
           model: llmProvider(model.id),
@@ -690,53 +778,80 @@ function getModelStatus() {
   }))
 }
 
-function localFallback(userMessage: string): string {
-  const lower = userMessage.toLowerCase()
-  if (lower.includes('weather')) return `**Master**, I'm temporarily disconnected from weather data. Check wttr.in/Erode for current conditions. I'll be back online shortly.`
-  if (lower.includes('code') || lower.includes('script')) return `**Master**, the AI code generation service is temporarily rate-limited. Try again in 1-2 minutes — auto-recovery is in progress.`
-  if (lower.includes('help')) return `**Master**, I'm in standby mode due to API rate limits. I'm still tracking your tasks, projects, and notes. Full AI capabilities will restore momentarily.`
-  return `**Standby Mode, Master** — The AI service hit a temporary rate limit. Auto-recovery is in progress. I'll be back to full power in 1-2 minutes.`
-}
-
 // POST /api/ai/chat
 app.post('/ai/chat', requireAuth, async (c) => {
   try {
     const body = await c.req.json()
-    const { messages } = body as { messages: Array<{ role: string; content: string }> }
+    const { messages, model: preferredModelId } = body as {
+      messages: Array<{ role: string; content: string }>
+      model?: string
+    }
     if (!messages?.length) return c.json({ error: 'messages array required' }, 400)
 
     const liveContext = await fetchLiveContext()
     const fullPrompt = JARVIS_SYSTEM_PROMPT + liveContext
 
+    let answer: { text: string; source: string }
     try {
-      const { text, source } = await callAI(fullPrompt, messages)
-      // Log conversation
-      const lastUser = messages.filter(m => m.role === 'user').pop()
-      if (lastUser) {
-        await (prisma as any).conversation.create({ data: { role: 'user', content: lastUser.content, sessionId: 'main' } }).catch(() => {})
-        await (prisma as any).conversation.create({ data: { role: 'assistant', content: text.substring(0, 2000), sessionId: 'main' } }).catch(() => {})
-      }
-      return c.json({ content: text, source })
+      answer = await callAI(fullPrompt, messages, preferredModelId)
     } catch (aiError: any) {
+      // PRODUCTION RULE: never fabricate an assistant reply. A canned "standby
+      // mode" message looks like J.A.R.V.I.S. answered when nothing did. Report
+      // the real failure and let the UI show an honest connection notice.
       const keys = loadKeys()
       const hasOwnKey = Boolean(keys.openai || keys.anthropic || keys.gemini)
+      await (prisma as any).activityLog.create({
+        data: { action: 'ai_chat_failed', details: String(aiError?.message || '').slice(0, 400), surface: 'chat' },
+      }).catch(() => {})
       return c.json({
-        content: localFallback(messages[messages.length - 1]?.content || ''),
-        source: 'local-fallback',
+        error: 'No AI model could be reached',
+        detail: String(aiError?.message || '').slice(0, 500),
         setupHint: hasOwnKey
-          ? 'Your saved provider keys were also tried and failed. Check the key values in Settings.'
-          : 'No AI provider reached. Add your own OpenAI / Anthropic / Gemini key in Settings → AI Providers to guarantee 24/7 uptime.',
-        error: aiError?.message?.slice(0, 400),
-      })
+          ? 'Your saved provider keys were tried and failed too — re-check them in Settings - AI Providers.'
+          : 'Add your own OpenAI / Anthropic / Gemini key in Settings - AI Providers so chat never depends on a shared pool.',
+      }, 503)
     }
+
+    const lastUser = messages.filter(m => m.role === 'user').pop()
+    if (lastUser) {
+      await (prisma as any).conversation.create({ data: { role: 'user', content: lastUser.content, sessionId: 'main' } }).catch(() => {})
+      await (prisma as any).conversation.create({ data: { role: 'assistant', content: answer.text.substring(0, 2000), sessionId: 'main' } }).catch(() => {})
+      await (prisma as any).activityLog.create({ data: { action: 'ai_chat', details: answer.source, surface: 'chat' } }).catch(() => {})
+    }
+    return c.json({ content: answer.text, source: answer.source })
   } catch (error: any) {
     return c.json({ error: error.message || 'Chat error' }, 500)
   }
 })
 
+// GET /api/ai/history — restore the conversation across reloads
+app.get('/ai/history', requireAuth, async (c) => {
+  const limit = Math.min(Number(c.req.query('limit') || 80), 300)
+  const rows = await (prisma as any).conversation.findMany({
+    where: { sessionId: 'main' },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  }).catch(() => [])
+  return c.json({
+    messages: rows.reverse().map((r: any) => ({ role: r.role, content: r.content, createdAt: r.createdAt })),
+  })
+})
+
+// DELETE /api/ai/history
+app.delete('/ai/history', requireAuth, async (c) => {
+  const res = await (prisma as any).conversation.deleteMany({ where: { sessionId: 'main' } })
+  return c.json({ ok: true, deleted: res.count })
+})
+
 // GET /api/ai/models
 app.get('/ai/models', (c) => {
-  return c.json({ models: MODEL_CHAIN.map(m => ({ name: m.name, healthy: m.healthy || isModelReady(m), cooldownRemaining: m.healthy ? 0 : Math.max(0, m.cooldownMs - (Date.now() - m.lastFailAt)) })) })
+  return c.json({ models: MODEL_CHAIN.map(m => ({
+    id: m.id,
+    name: m.name,
+    healthy: m.healthy || isModelReady(m),
+    cooldownRemaining: m.healthy ? 0 : Math.max(0, m.cooldownMs - (Date.now() - m.lastFailAt)),
+    lastError: m.lastError,
+  })) })
 })
 
 // ═══════════════════════════════════════════════════════════════════

@@ -14,12 +14,13 @@ import Journal from './surfaces/Journal'
 import Analytics from './surfaces/Analytics'
 import KnowledgeHub from './surfaces/KnowledgeHub'
 import TechRadar from './surfaces/TechRadar'
+import Profile from './surfaces/Profile'
 import Inbox from './surfaces/Inbox'
 import {
   LayoutDashboard, MessageSquare, Layers, Code2, Workflow,
   CalendarCheck, Target, BookOpen, BarChart3, Brain, Globe,
   Menu, X, Settings, Lock, Shield, LogOut, Eye, EyeOff, AlertTriangle,
-  ChevronRight, MemoryStick, Link2, Fingerprint
+  ChevronRight, MemoryStick, Link2, Fingerprint, UserRound
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { authHeaders } from '@/lib/api'
@@ -37,6 +38,7 @@ const navItems = [
   { id: 'habits', icon: <Target className="w-4 h-4" />, label: 'Habits', mobileLabel: 'Habits' },
   { id: 'journal', icon: <BookOpen className="w-4 h-4" />, label: 'Journal', mobileLabel: 'Journal' },
   { id: 'analytics', icon: <BarChart3 className="w-4 h-4" />, label: 'Analytics', mobileLabel: 'Stats' },
+  { id: 'profile', icon: <UserRound className="w-4 h-4" />, label: 'Profile', mobileLabel: 'Profile' },
 ]
 
 const bottomTabs = [
@@ -311,15 +313,16 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, currentPassword: currentPw, newPassword: newPw }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setPwSuccess('Password changed! All sessions invalidated.')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`)
+      // Other devices are signed out server-side; this device stays logged in,
+      // so Sri can change his password without being kicked out.
+      setPwSuccess(data?.message || 'Password changed.')
       setCurrentPw(''); setNewPw(''); setConfirmPw('')
-      setTimeout(() => handleLogout(), 2000)
-    } catch (err: any) { setPwError(err.message) }
+    } catch (err: any) { setPwError(err?.message || 'Could not change password') }
   }
 
   const handleNavigate = (tab: string) => { setActiveTab(tab); setMobileMenuOpen(false) }
@@ -354,7 +357,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 font-mono">{username}</span>
+            <button
+              onClick={() => handleNavigate('profile')}
+              title={`${username} — profile, password, sessions`}
+              className={cn("flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg transition-all",
+                activeTab === 'profile' ? "bg-cyan-500/10 text-cyan-400" : "text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10")}
+            >
+              <span className="w-6 h-6 rounded-md bg-gradient-to-br from-cyan-500/30 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-[10px] font-bold text-cyan-300">
+                {(username || 'S').charAt(0).toUpperCase()}
+              </span>
+              <span className="text-[10px] font-mono hidden lg:inline max-w-[8rem] truncate">{username}</span>
+            </button>
             <button onClick={() => setSettingsOpen(true)} className="p-2 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10"><Settings className="w-4 h-4" /></button>
             <button onClick={handleLogout} className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10"><Lock className="w-4 h-4" /></button>
           </div>
@@ -372,8 +385,12 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setSettingsOpen(true)} className="p-2 text-slate-400"><Settings className="w-4 h-4" /></button>
-            <button onClick={handleLogout} className="p-2 text-slate-400"><Lock className="w-4 h-4" /></button>
+            <button onClick={() => setSettingsOpen(true)} className="p-2 text-slate-400" aria-label="Settings"><Settings className="w-4 h-4" /></button>
+            <button onClick={() => handleNavigate('profile')} aria-label="Profile" className="p-1 text-slate-400">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-500/30 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-[11px] font-bold text-cyan-300">
+                {(username || 'S').charAt(0).toUpperCase()}
+              </span>
+            </button>
           </div>
         </div>
       </div>
@@ -414,6 +431,7 @@ export default function App() {
         {activeTab === 'habits' && <HabitsTracker />}
         {activeTab === 'journal' && <Journal />}
         {activeTab === 'analytics' && <Analytics />}
+        {activeTab === 'profile' && <Profile onLogout={handleLogout} />}
         {activeTab === 'memory' && <MemoryView />}
         {activeTab === 'connections' && <ConnectionsView />}
         {activeTab === 'more' && (

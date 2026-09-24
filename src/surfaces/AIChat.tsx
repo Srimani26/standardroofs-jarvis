@@ -1,13 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, Search, Mic, Bot, User, Sparkles, ArrowUpRight, RotateCcw, Loader2 } from 'lucide-react'
+import { Send, Search, Mic, Bot, User, Sparkles, ArrowUpRight, RotateCcw, Loader2, AlertTriangle, Cpu, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { jsonAuthHeaders } from '@/lib/api'
+import { authHeaders, jsonAuthHeaders } from '@/lib/api'
+import { Select, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
+  /** Which model answered, when the reply came from a live model. */
+  source?: string
+  /** True when this bubble is a connection notice, not an answer. */
+  error?: boolean
+  detail?: string
+  setupHint?: string
 }
 
 const QUICK_ACTIONS = [
@@ -90,15 +97,62 @@ export default function AIChat() {
   const [isListening, setIsListening] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
   const [jarvisMode, setJarvisMode] = useState<'active' | 'sleeping'>('active')
+  const [models, setModels] = useState<Array<{ id: string; name: string; healthy: boolean }>>([])
+  const [selectedModel, setSelectedModel] = useState('auto')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const recognitionRef = useRef<any>(null)
 
+  const GREETING: Message = {
+    id: generateId(),
+    role: 'assistant',
+    content: "Greetings, Master Sri. I am **J.A.R.V.I.S.** — your personal AI command center.\n\nI am fully online and at your service. Here's what I can do for you:\n\n- 💻 **Write any code** — Python, TypeScript, Deluge, Apps Script, React, Next.js, FastAPI\n- ⚙️ **Build automations** — n8n workflows, Zoho CRM, Google Ads pipelines\n- 🐛 **Debug & fix** — paste any error, I'll trace and fix it\n- 🏗️ **Design systems** — architecture, APIs, databases, workflows\n- 📧 **Manage email** — read, send, organize your Gmail\n- 📅 **Your schedule** — check calendar, plan meetings\n- 🌐 **Research** — find best tools, frameworks, techniques\n- 💰 **Business** — strategy, automation, revenue optimization\n\n**Your wish is my command, Master. What shall we build today?**",
+    timestamp: new Date(),
+  }
+
+  // Restore the conversation Sri was in the middle of, so a reload does not
+  // throw away his history.
   useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/ai/history?limit=40', { headers: authHeaders() })
+        const body = await res.json().catch(() => ({}))
+        const restored: Message[] = (body?.messages || [])
+          .filter((msg: any) => msg?.role === 'user' || msg?.role === 'assistant')
+          .map((msg: any) => ({
+            id: generateId(),
+            role: msg.role as 'user' | 'assistant',
+            content: String(msg.content || ''),
+            timestamp: new Date(msg.createdAt || Date.now()),
+          }))
+        if (cancelled) return
+        setMessages(restored.length ? restored : [GREETING])
+      } catch {
+        if (!cancelled) setMessages([GREETING])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Which models are actually live right now.
+  useEffect(() => {
+    fetch('/api/ai/models')
+      .then(r => r.json())
+      .then(d => setModels(d?.models || []))
+      .catch(() => {})
+  }, [])
+
+  const selectedLabel = selectedModel === 'auto'
+    ? 'Auto'
+    : (models.find(mm => mm.id === selectedModel)?.name || selectedModel)
+
+  const resetChat = useCallback(async () => {
+    fetch('/api/ai/history', { method: 'DELETE', headers: authHeaders() }).catch(() => {})
     setMessages([{
       id: generateId(),
       role: 'assistant',
-      content: "Greetings, Master Sri. I am **J.A.R.V.I.S.** — your personal AI command center.\n\nI am fully online and at your service. Here's what I can do for you:\n\n- 💻 **Write any code** — Python, TypeScript, Deluge, Apps Script, React, Next.js, FastAPI\n- ⚙️ **Build automations** — n8n workflows, Zoho CRM, Google Ads pipelines\n- 🐛 **Debug & fix** — paste any error, I'll trace and fix it\n- 🏗️ **Design systems** — architecture, APIs, databases, workflows\n- 📧 **Manage email** — read, send, organize your Gmail\n- 📅 **Your schedule** — check calendar, plan meetings\n- 🌐 **Research** — find best tools, frameworks, techniques\n- 💰 **Business** — strategy, automation, revenue optimization\n\n**Your wish is my command, Master. What shall we build today?**",
+      content: 'Systems reset, Master. A fresh slate — what would you like me to work on?',
       timestamp: new Date(),
     }])
   }, [])
@@ -144,7 +198,7 @@ export default function AIChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping])
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, opts?: { skipUserEcho?: boolean }) => {
     if (!text.trim() || isTyping) return
 
     const lower = text.trim().toLowerCase()
@@ -187,22 +241,37 @@ export default function AIChat() {
       timestamp: new Date(),
     }
 
-    const newMessages = [...messages, userMsg]
+    const newMessages = opts?.skipUserEcho ? messages : [...messages, userMsg]
     setMessages(newMessages)
     setInput('')
     setIsTyping(true)
 
     const assistantId = generateId()
 
-    const updateAssistant = (content: string) => {
+    const updateAssistant = (content: string, source?: string) => {
       setMessages(prev => {
         const updated = [...prev]
         const lastIdx = updated.findIndex(m => m.id === assistantId)
         if (lastIdx >= 0) {
-          updated[lastIdx] = { ...updated[lastIdx], content }
+          updated[lastIdx] = { ...updated[lastIdx], content, source, error: false, detail: undefined, setupHint: undefined }
         } else {
-          updated.push({ id: assistantId, role: 'assistant', content, timestamp: new Date() })
+          updated.push({ id: assistantId, role: 'assistant', content, timestamp: new Date(), source })
         }
+        return updated
+      })
+    }
+
+    // A failed call must never masquerade as an answer from J.A.R.V.I.S.
+    // Surface the real reason and the way to fix it instead.
+    const failAssistant = (content: string, detail?: string, setupHint?: string) => {
+      setMessages(prev => {
+        const updated = [...prev]
+        const idx = updated.findIndex(mm => mm.id === assistantId)
+        const notice: Message = {
+          id: assistantId, role: 'assistant', content, timestamp: new Date(), error: true, detail, setupHint,
+        }
+        if (idx >= 0) updated[idx] = notice
+        else updated.push(notice)
         return updated
       })
     }
@@ -212,7 +281,10 @@ export default function AIChat() {
         method: 'POST',
         headers: jsonAuthHeaders(),
         body: JSON.stringify({
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          messages: newMessages
+            .filter(msg => !msg.error)
+            .map(msg => ({ role: msg.role, content: msg.content })),
+          model: selectedModel === 'auto' ? undefined : selectedModel,
         }),
       })
 
@@ -223,11 +295,7 @@ export default function AIChat() {
       }
 
       if (data.content) {
-        if (data.source === 'local-fallback' && data.setupHint) {
-          updateAssistant(`${data.content}\n\n---\n**⚙️ Setup needed, Master:** ${data.setupHint}`)
-        } else {
-          updateAssistant(data.content)
-        }
+        updateAssistant(data.content, data.source)
         return
       }
 
@@ -239,22 +307,29 @@ export default function AIChat() {
           method: 'POST',
           headers: jsonAuthHeaders(),
           body: JSON.stringify({
-            messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+            messages: newMessages
+              .filter(msg => !msg.error)
+              .map(msg => ({ role: msg.role, content: msg.content })),
+            model: selectedModel === 'auto' ? undefined : selectedModel,
           }),
         })
         const retryData = await retryRes.json().catch(() => null)
         if (retryRes.ok && retryData?.content) {
-          updateAssistant(retryData.content)
+          updateAssistant(retryData.content, retryData.source)
           return
         }
       } catch {}
 
-      updateAssistant(`⚠️ **I hit a snag, Master:** ${error.message}\n\nTry again in a moment — I'm always here.`)
+      failAssistant(
+        'Connection failed — no AI model answered.',
+        error?.message || 'Unknown error',
+        'Retry below. If it keeps failing, check Settings - AI Providers.',
+      )
     } finally {
       setIsTyping(false)
       inputRef.current?.focus()
     }
-  }, [messages, isTyping])
+  }, [messages, isTyping, selectedModel])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -262,6 +337,8 @@ export default function AIChat() {
       sendMessage(input)
     }
   }
+
+  const lastUserText = [...messages].reverse().find(msg => msg.role === 'user' && !msg.error)?.content || ''
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-8rem)]">
@@ -274,23 +351,33 @@ export default function AIChat() {
           <div>
             <h2 className="text-sm font-semibold text-foreground">J.A.R.V.I.S. AI</h2>
             <p className="text-xs text-primary/60 font-mono">
-              {jarvisMode === 'sleeping' ? '🌙 Standby Mode — Say "Hey JARVIS" to wake' : isTyping ? 'Thinking...' : 'Online • Multi-AI Active'}
+              {jarvisMode === 'sleeping' ? '🌙 Standby Mode — Say "Hey JARVIS" to wake' : isTyping ? 'Thinking…' : `Online • ${selectedLabel}`}
             </p>
           </div>
         </div>
-        <button
-          onClick={() => {
-            setMessages([{
-              id: generateId(),
-              role: 'assistant',
-              content: "Systems reset, Master. A fresh slate — what would you like me to work on?",
-              timestamp: new Date(),
-            }])
-          }}
-          className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all"
-        >
-          <RotateCcw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger className="h-9 w-[7.5rem] sm:w-[11rem] rounded-lg border border-border bg-muted/40 px-2.5 text-xs">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <Cpu className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span className="truncate">{selectedLabel}</span>
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto — failover chain</SelectItem>
+              {models.map(mm => (
+                <SelectItem key={mm.id} value={mm.id}>{mm.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            onClick={resetChat}
+            title="Clear conversation"
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Messages Area */}
@@ -329,13 +416,41 @@ export default function AIChat() {
               }
             </div>
             <div className={cn(
-              'rounded-2xl px-4 py-3',
+              'rounded-2xl px-4 py-3 min-w-0',
               msg.role === 'user'
                 ? 'bg-primary/15 text-foreground rounded-tr-sm'
-                : 'jarvis-card rounded-tl-sm'
+                : msg.error
+                  ? 'bg-amber-500/10 border border-amber-500/30 rounded-tl-sm'
+                  : 'jarvis-card rounded-tl-sm'
             )}>
-              <div className="space-y-1">{renderMarkdown(msg.content)}</div>
-              <p className="text-[10px] text-muted-foreground mt-2 opacity-60">{formatTime(msg.timestamp)}</p>
+              {msg.error ? (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                    <p className="text-sm text-amber-200">{msg.content}</p>
+                  </div>
+                  {msg.detail && (
+                    <p className="text-[11px] font-mono text-muted-foreground break-words pl-6">{msg.detail}</p>
+                  )}
+                  {msg.setupHint && (
+                    <p className="text-[11px] text-muted-foreground pl-6">{msg.setupHint}</p>
+                  )}
+                  <div className="pl-6">
+                    <button
+                      onClick={() => lastUserText && sendMessage(lastUserText, { skipUserEcho: true })}
+                      disabled={isTyping || !lastUserText}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 text-[11px] font-semibold text-amber-100 transition-colors"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Retry
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">{renderMarkdown(msg.content)}</div>
+              )}
+              <p className="text-[10px] text-muted-foreground mt-2 opacity-60">
+                {formatTime(msg.timestamp)}{msg.source ? ` · ${msg.source}` : ''}
+              </p>
             </div>
           </div>
         ))}
