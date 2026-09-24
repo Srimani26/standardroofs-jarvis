@@ -220,3 +220,38 @@ How it is wired today:
   catch-all: without it, unmatched API paths fall through to the SPA static
   handler and return `index.html` with HTTP 200, which the client reports as
   "API server not ready" while the server is perfectly healthy.
+
+# ⚠️ "Project Ready / Start building your app" on the live URL
+
+If anyone reports seeing the **blank scaffold** instead of this app, do NOT go
+hunting for a stale browser cache. It is not that. Diagnose it like this:
+
+```sh
+URL=https://<project-id>.preview.shogo.ai
+# Ask the same URL 30 times and count distinct bundle hashes:
+for i in $(seq 1 30); do curl -s "$URL/?cb=$RANDOM" \
+  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1; done | sort | uniq -c
+```
+
+- **One hash** → normal. Look elsewhere (the page really is the current build).
+- **More than one hash, or 200/404 flapping on the same asset** → the preview
+  host is answered by a **pool of backends with divergent `dist/` state**, some
+  left over from an earlier incarnation of this workspace. Those stale backends
+  serve *a different project's* HTML (watch for a foreign `/p/<other-id>/` in
+  the `<script src>`), which is what renders the blank scaffold.
+
+This is **infrastructure, not app code** — you cannot fix the stale backends
+from inside the project. What you can do:
+
+- Confirm the app itself is fine: `curl -s "$URL/api/health"` must be
+  `{"status":"operational",...}` and `/p/<our-id>/assets/<hash>.js` must
+  contain the real app.
+- `scripts/guard-dist.mjs` (wired into `npm run build`) quarantines any built
+  asset containing the blank-template marker, so a blank scaffold can never be
+  served from our own `dist/`. Keep it.
+- Clients get pinned per-connection to whichever backend their edge picked, so
+  one device can persistently see the blank page while another is fine. A new
+  connection (airplane mode on/off, Wi-Fi ↔ cellular) usually lands on a good
+  one.
+- The real fix is a **fresh hostname**: `publish` gives a clean URL with no
+  pool history behind it. Requires Pro+ (`plan_not_allowed` on Free/Basic).

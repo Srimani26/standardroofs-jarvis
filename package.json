@@ -9,7 +9,7 @@
     "dev:full": "concurrently \"bun run dev:server\" \"bun run dev:client\"",
     "dev:server": "bun --watch run server.tsx",
     "dev:client": "vite",
-    "build": "vite build",
+    "build": "vite build && (node scripts/guard-dist.mjs || true)",
     "start": "bun run server.tsx",
     "generate": "bun ./node_modules/@shogo-ai/sdk/bin/cli.mjs generate",
     "db:generate": "bun x --bun prisma generate",
