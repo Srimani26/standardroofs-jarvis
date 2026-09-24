@@ -23,7 +23,7 @@ import {
   ChevronRight, MemoryStick, Link2, Fingerprint, UserRound
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { authHeaders } from '@/lib/api'
+import { authHeaders, jsonAuthHeaders } from '@/lib/api'
 
 const navItems = [
   { id: 'command', icon: <LayoutDashboard className="w-4 h-4" />, label: 'HQ', mobileLabel: 'Home' },
@@ -211,14 +211,14 @@ export default function App() {
   const [inviteCode, setInviteCode] = useState('')
 
   const loadProviders = useCallback(() => {
-    fetch('/api/settings/keys', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/settings/keys', { headers: authHeaders() })
       .then(r => r.json())
       .then(d => setProviders(d.providers || []))
       .catch(() => {})
   }, [token])
 
   const loadInviteCode = useCallback(() => {
-    fetch('/api/auth/invite-code', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/auth/invite-code', { headers: authHeaders() })
       .then(r => (r.ok ? r.json() : {}) as Promise<{ inviteCode?: string }>)
       .then(d => setInviteCode(d.inviteCode || ''))
       .catch(() => {})
@@ -237,7 +237,7 @@ export default function App() {
     try {
       const res = await fetch('/api/settings/keys', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: jsonAuthHeaders(),
         body: JSON.stringify({ provider: selectedProvider, key: newKey.trim() }),
       })
       const data = await res.json()
@@ -253,7 +253,7 @@ export default function App() {
   }
 
   const removeProviderKey = async (provider: string) => {
-    await fetch(`/api/settings/keys/${provider}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+    await fetch(`/api/settings/keys/${provider}`, { method: 'DELETE', headers: authHeaders() })
     loadProviders()
   }
 
@@ -265,7 +265,7 @@ export default function App() {
       setAuthenticated(true)
       setUsername(u => u || name || localStorage.getItem('jarvis_user') || '')
     }
-    fetch('/api/auth/status', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/auth/status', { headers: authHeaders() })
       .then(async r => ({ ok: r.ok, body: (await r.json().catch(() => ({}))) as { authenticated?: boolean; username?: string } }))
       .then(({ ok, body }) => {
         if (cancelled) return
@@ -296,7 +296,7 @@ export default function App() {
   }
 
   const handleLogout = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }) } catch {}
+    try { await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }) } catch {}
     localStorage.removeItem('jarvis_token')
     localStorage.removeItem('jarvis_user')
     setToken('')
@@ -313,7 +313,7 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: jsonAuthHeaders(),
         body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }),
       })
       const data = await res.json().catch(() => ({}))
@@ -326,7 +326,6 @@ export default function App() {
   }
 
   const handleNavigate = (tab: string) => { setActiveTab(tab); setMobileMenuOpen(false) }
-  const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
   if (!authenticated) return <LoginScreen onLogin={handleLogin} />
 

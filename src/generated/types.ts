@@ -133,6 +133,15 @@ export interface UserSessionType {
   createdAt: Date
 }
 
+export interface SystemEventType {
+  id: string
+  level: string
+  source: string
+  message: string
+  meta?: string
+  createdAt: Date
+}
+
 // ============================================================================
 // Input Types
 // ============================================================================
@@ -321,6 +330,20 @@ export interface UserSessionUpdateInput {
   isActive?: boolean
 }
 
+export interface SystemEventCreateInput {
+  level?: string
+  source: string
+  message: string
+  meta?: string
+}
+
+export interface SystemEventUpdateInput {
+  level?: string
+  source?: string
+  message?: string
+  meta?: string
+}
+
 // ============================================================================
 // Hook Types
 // ============================================================================
@@ -371,4 +394,5 @@ export interface ServerFunctionHooks {
   ActivityLog?: ModelHooks<ActivityLogCreateInput, ActivityLogUpdateInput, ActivityLogType>
   DailySummary?: ModelHooks<DailySummaryCreateInput, DailySummaryUpdateInput, DailySummaryType>
   UserSession?: ModelHooks<UserSessionCreateInput, UserSessionUpdateInput, UserSessionType>
+  SystemEvent?: ModelHooks<SystemEventCreateInput, SystemEventUpdateInput, SystemEventType>
 }

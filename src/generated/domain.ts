@@ -74,6 +74,11 @@ import {
   createUserSession,
   updateUserSession,
   deleteUserSession,
+  getSystemEventList,
+  getSystemEventById,
+  createSystemEvent,
+  updateSystemEvent,
+  deleteSystemEvent,
 } from './server-functions'
 
 import type {
@@ -116,6 +121,9 @@ import type {
   UserSessionType,
   UserSessionCreateInput,
   UserSessionUpdateInput,
+  SystemEventType,
+  SystemEventCreateInput,
+  SystemEventUpdateInput,
 } from './types'
 
 // ============================================================================
@@ -2823,6 +2831,214 @@ export class UserSessionStore {
 }
 
 // ============================================================================
+// SystemEvent Store
+// ============================================================================
+
+export class SystemEventStore {
+  items: Map<string, SystemEventType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): SystemEventType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): SystemEventType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getSystemEventList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getSystemEventById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: SystemEventCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: SystemEventType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as SystemEventType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createSystemEvent({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: SystemEventUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[SystemEventStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as SystemEventType)
+    })
+
+    try {
+      const item = await updateSystemEvent({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[SystemEventStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteSystemEvent({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
 // Root Store
 // ============================================================================
 
@@ -2840,6 +3056,7 @@ export class RootStore {
   activityLog: ActivityLogStore
   dailySummary: DailySummaryStore
   userSession: UserSessionStore
+  systemEvent: SystemEventStore
 
   constructor() {
     this.user = new UserStore()
@@ -2855,6 +3072,7 @@ export class RootStore {
     this.activityLog = new ActivityLogStore()
     this.dailySummary = new DailySummaryStore()
     this.userSession = new UserSessionStore()
+    this.systemEvent = new SystemEventStore()
     makeAutoObservable(this)
   }
 
@@ -2873,6 +3091,7 @@ export class RootStore {
     this.activityLog.clear()
     this.dailySummary.clear()
     this.userSession.clear()
+    this.systemEvent.clear()
   }
 }
 

@@ -48,6 +48,9 @@ import type {
   UserSessionType,
   UserSessionCreateInput,
   UserSessionUpdateInput,
+  SystemEventType,
+  SystemEventCreateInput,
+  SystemEventUpdateInput,
 } from './types'
 
 /** Get the API base URL */
@@ -1237,6 +1240,97 @@ export async function deleteUserSession(args: { data: { id: string; userId?: str
   if (!response.ok) {
     const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
     throw new Error(err.error?.message || 'Failed to delete UserSession')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// SystemEvent Client Functions
+// ============================================================================
+
+/**
+ * List all SystemEvent records
+ */
+export async function getSystemEventList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<SystemEventType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/system-events${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list SystemEvent')
+  }
+  const json = await response.json()
+  return (json.items || []) as SystemEventType[]
+}
+
+/**
+ * Get a single SystemEvent by ID
+ */
+export async function getSystemEventById(args: { data: { id: string; userId?: string } }): Promise<SystemEventType> {
+  const url = `${getApiBase()}/api/system-events/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'SystemEvent not found')
+  }
+  const json = await response.json()
+  return json.data as SystemEventType
+}
+
+/**
+ * Create a new SystemEvent
+ */
+export async function createSystemEvent(args: { data: { input: SystemEventCreateInput; userId?: string } }): Promise<SystemEventType> {
+  const url = `${getApiBase()}/api/system-events`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create SystemEvent')
+  }
+  const json = await response.json()
+  return json.data as SystemEventType
+}
+
+/**
+ * Update an existing SystemEvent
+ */
+export async function updateSystemEvent(args: { data: { id: string; input: SystemEventUpdateInput; userId?: string } }): Promise<SystemEventType> {
+  const url = `${getApiBase()}/api/system-events/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update SystemEvent')
+  }
+  const json = await response.json()
+  return json.data as SystemEventType
+}
+
+/**
+ * Delete a SystemEvent
+ */
+export async function deleteSystemEvent(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/system-events/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete SystemEvent')
   }
   return { success: true }
 }

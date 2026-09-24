@@ -63,7 +63,8 @@ export const ModelName = {
   Conversation: 'Conversation',
   ActivityLog: 'ActivityLog',
   DailySummary: 'DailySummary',
-  UserSession: 'UserSession'
+  UserSession: 'UserSession',
+  SystemEvent: 'SystemEvent'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -238,6 +239,18 @@ export const UserSessionScalarFieldEnum = {
 } as const
 
 export type UserSessionScalarFieldEnum = (typeof UserSessionScalarFieldEnum)[keyof typeof UserSessionScalarFieldEnum]
+
+
+export const SystemEventScalarFieldEnum = {
+  id: 'id',
+  level: 'level',
+  source: 'source',
+  message: 'message',
+  meta: 'meta',
+  createdAt: 'createdAt'
+} as const
+
+export type SystemEventScalarFieldEnum = (typeof SystemEventScalarFieldEnum)[keyof typeof SystemEventScalarFieldEnum]
 
 
 export const SortOrder = {

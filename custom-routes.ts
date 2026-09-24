@@ -102,6 +102,58 @@ app.use('*', async (c, next) => {
   await next()
 })
 
+// ═══════════════════════════════════════════════════════════════════
+// SELF-HEALING
+// Every "it crashed" so far has been one of two things: the database had no
+// tables (SQLITE_ERROR: no such table: main.auth_users → every login 500'd),
+// or an unhandled throw returned non-JSON and the UI showed "API server not
+// ready". Both are repaired here rather than left for a human to notice.
+// ═══════════════════════════════════════════════════════════════════
+
+let schemaRepairAttempted = false
+
+async function ensureDatabaseSchema() {
+  if (schemaRepairAttempted) return
+  try {
+    await (prisma as any).$queryRawUnsafe('SELECT 1 FROM auth_users LIMIT 1')
+    return // schema is present — nothing to do
+  } catch (err: any) {
+    const msg = String(err?.message ?? err)
+    if (!/no such table|does not exist/i.test(msg)) return
+    schemaRepairAttempted = true
+    console.error('[jarvis] database schema missing, repairing:', msg)
+    try {
+      const { execFileSync } = await import('node:child_process')
+      // Additive only — deliberately NO --accept-data-loss and NO --force-reset,
+      // so this can create missing tables but can never destroy existing data.
+      execFileSync('bun', ['x', '--bun', 'prisma', 'db', 'push'], {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        timeout: 120_000,
+      })
+      console.log('[jarvis] schema repair complete')
+    } catch (repairErr: any) {
+      console.error('[jarvis] schema repair failed:', repairErr?.message ?? repairErr)
+    }
+  }
+}
+
+// Each /api request gets a repair check first. It is a single indexed lookup
+// once the tables exist, and the failure is what it fixes — a request that
+// arrives before the repair finishes simply reports the honest error.
+app.use('*', async (c, next) => {
+  await ensureDatabaseSchema()
+  await next()
+})
+
+// An unhandled throw used to produce a bare "Internal Server Error" body the UI
+// could not explain. Always answer with JSON carrying the real message.
+app.onError((err: any, c) => {
+  const message = String(err?.message ?? err ?? 'Unknown server error')
+  console.error('[jarvis] unhandled error on', c.req.method, c.req.path, '-', message)
+  return c.json({ error: 'Server error', detail: message.slice(0, 500) }, 500)
+})
+
 // Input sanitizer
 function sanitize(str: string): string {
   if (!str || typeof str !== 'string') return str
@@ -161,12 +213,29 @@ function validateCredentials(username: unknown, password: unknown): string | nul
   return null
 }
 
+// The pod's public proxy consumes the `Authorization` header for its own
+// gateway auth, so a token sent only there never reaches this app — every
+// authenticated call came back 401 and the UI bounced straight back to the
+// login screen. `x-jarvis-token` passes through the proxy untouched; bare
+// `Bearer` still works for direct calls (curl, tests, other pods).
+function readToken(c: any): string {
+  const auth = c.req.header('Authorization') || ''
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim()
+  const header =
+    c.req.header('x-jarvis-token') || c.req.header('x-auth-token') || ''
+  if (header.trim()) return header.trim()
+  const cookie = c.req.header('Cookie') || ''
+  const fromCookie = cookie.match(/(?:^|;\s*)jarvis_token=([^;]+)/)
+  if (fromCookie) return decodeURIComponent(fromCookie[1]).trim()
+  return (c.req.query('token') || '').trim()
+}
+
 // Verify JWT middleware
 async function requireAuth(c: any, next: any) {
-  const authHeader = c.req.header('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) return c.json({ error: 'Unauthorized' }, 401)
+  const token = readToken(c)
+  if (!token) return c.json({ error: 'Unauthorized' }, 401)
   try {
-    const decoded = jwt.verify(authHeader.slice(7), JWT_SECRET) as any
+    const decoded = jwt.verify(token, JWT_SECRET) as any
     c.set('userId', decoded.userId)
     c.set('username', decoded.username)
     await next()
@@ -422,8 +491,7 @@ app.post('/auth/change-password', requireAuth, async (c) => {
 
   // Keep the session Sri is changing the password from and sign out every other
   // device. Wiping them all used to log him straight back out.
-  const authHeader = c.req.header('Authorization') || ''
-  const currentToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const currentToken = readToken(c)
   await (prisma as any).authSession.deleteMany({ where: { userId: user.id, token: { not: currentToken } } }).catch(() => {})
   await (prisma as any).activityLog.create({ data: { action: 'password_change', details: 'Password changed', surface: 'security' } }).catch(() => {})
 
@@ -432,9 +500,8 @@ app.post('/auth/change-password', requireAuth, async (c) => {
 
 // POST /api/auth/logout
 app.post('/auth/logout', async (c) => {
-  const authHeader = c.req.header('Authorization')
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7)
+  const token = readToken(c)
+  if (token) {
     await (prisma as any).authSession.deleteMany({ where: { token } }).catch(() => {})
   }
   return c.json({ ok: true })
@@ -442,10 +509,10 @@ app.post('/auth/logout', async (c) => {
 
 // GET /api/auth/status
 app.get('/auth/status', (c) => {
-  const authHeader = c.req.header('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) return c.json({ authenticated: false })
+  const token = readToken(c)
+  if (!token) return c.json({ authenticated: false })
   try {
-    const decoded = jwt.verify(authHeader.slice(7), JWT_SECRET) as any
+    const decoded = jwt.verify(token, JWT_SECRET) as any
     return c.json({ authenticated: true, username: decoded.username })
   } catch {
     return c.json({ authenticated: false })
@@ -458,8 +525,7 @@ app.get('/auth/invite-code', requireAuth, (c) => c.json({ inviteCode: INVITE_COD
 // GET /api/auth/me — one call for the whole Profile surface
 app.get('/auth/me', requireAuth, async (c) => {
   const userId = c.get('userId') as string
-  const authHeader = c.req.header('Authorization') || ''
-  const currentToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const currentToken = readToken(c)
 
   const user = await (prisma as any).authUser.findUnique({ where: { id: userId } })
   if (!user) return c.json({ error: 'User not found' }, 404)
@@ -500,8 +566,7 @@ app.get('/auth/me', requireAuth, async (c) => {
 // POST /api/auth/logout-others — sign out every device except this one
 app.post('/auth/logout-others', requireAuth, async (c) => {
   const userId = c.get('userId') as string
-  const authHeader = c.req.header('Authorization') || ''
-  const currentToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const currentToken = readToken(c)
   const res = await (prisma as any).authSession.deleteMany({ where: { userId, token: { not: currentToken } } })
   await (prisma as any).activityLog.create({ data: { action: 'logout_others', details: `Signed out ${res.count} device(s)`, surface: 'security' } }).catch(() => {})
   return c.json({ ok: true, signedOut: res.count })
@@ -1360,5 +1425,17 @@ app.get('/calendar/upcoming', requireAuth, async (c) => {
     return c.json(failure, failure.code === 'INTEGRATION_NOT_CONNECTED' ? 412 : 500)
   }
 })
+
+// Catch-all — registered last so it only sees genuinely unmatched paths.
+// Without this, an unknown /api/* fell through to the SPA static handler and
+// returned index.html with HTTP 200: the frontend then failed to parse HTML as
+// JSON and reported "API server not ready" while the server was perfectly
+// healthy. An API path must always answer as an API.
+app.all('*', (c) =>
+  c.json(
+    { error: 'Not found', detail: `No API route for ${c.req.method} ${c.req.path}` },
+    404,
+  ),
+)
 
 export default app

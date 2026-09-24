@@ -106,3 +106,8 @@ export type DailySummary = Prisma.DailySummaryModel
  * 
  */
 export type UserSession = Prisma.UserSessionModel
+/**
+ * Model SystemEvent
+ * 
+ */
+export type SystemEvent = Prisma.SystemEventModel

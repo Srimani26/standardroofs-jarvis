@@ -23,6 +23,7 @@ import { createConversationRoutes, setPrisma as setPrismaConversation, setConver
 import { createActivityLogRoutes, setPrisma as setPrismaActivityLog, setActivityLogHooks } from "./activity-log.routes"
 import { createDailySummaryRoutes, setPrisma as setPrismaDailySummary, setDailySummaryHooks } from "./daily-summary.routes"
 import { createUserSessionRoutes, setPrisma as setPrismaUserSession, setUserSessionHooks } from "./user-session.routes"
+import { createSystemEventRoutes, setPrisma as setPrismaSystemEvent, setSystemEventHooks } from "./system-event.routes"
 
 // Hook imports
 import { userHooks } from "./user.hooks"
@@ -38,6 +39,7 @@ import { conversationHooks } from "./conversation.hooks"
 import { activityLogHooks } from "./activity-log.hooks"
 import { dailySummaryHooks } from "./daily-summary.hooks"
 import { userSessionHooks } from "./user-session.hooks"
+import { systemEventHooks } from "./system-event.hooks"
 
 // Re-export route creators and setters
 export {
@@ -79,7 +81,10 @@ export {
   setDailySummaryHooks,
   createUserSessionRoutes,
   setPrismaUserSession,
-  setUserSessionHooks
+  setUserSessionHooks,
+  createSystemEventRoutes,
+  setPrismaSystemEvent,
+  setSystemEventHooks
 }
 
 // Re-export hooks (model-specific)
@@ -96,7 +101,8 @@ export {
   conversationHooks,
   activityLogHooks,
   dailySummaryHooks,
-  userSessionHooks
+  userSessionHooks,
+  systemEventHooks
 }
 
 // Re-export hook types
@@ -113,6 +119,7 @@ export type { ConversationHooks } from "./conversation.hooks"
 export type { ActivityLogHooks } from "./activity-log.hooks"
 export type { DailySummaryHooks } from "./daily-summary.hooks"
 export type { UserSessionHooks } from "./user-session.hooks"
+export type { SystemEventHooks } from "./system-event.hooks"
 
 /**
  * Create all routes and mount them on a single Hono app
@@ -134,6 +141,7 @@ export function createAllRoutes(prisma: PrismaClient): Hono {
   setPrismaActivityLog(prisma)
   setPrismaDailySummary(prisma)
   setPrismaUserSession(prisma)
+  setPrismaSystemEvent(prisma)
 
   // Set hooks for all routes
   setUserHooks(userHooks)
@@ -149,6 +157,7 @@ export function createAllRoutes(prisma: PrismaClient): Hono {
   setActivityLogHooks(activityLogHooks)
   setDailySummaryHooks(dailySummaryHooks)
   setUserSessionHooks(userSessionHooks)
+  setSystemEventHooks(systemEventHooks)
 
   // Mount routes
   app.route("/users", createUserRoutes())
@@ -164,6 +173,7 @@ export function createAllRoutes(prisma: PrismaClient): Hono {
   app.route("/activity-logs", createActivityLogRoutes())
   app.route("/daily-summaries", createDailySummaryRoutes())
   app.route("/user-sessions", createUserSessionRoutes())
+  app.route("/system-events", createSystemEventRoutes())
 
   return app
 }

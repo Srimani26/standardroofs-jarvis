@@ -167,4 +167,17 @@ model UserSession {
   @@map("user_sessions")
 }
 
+model SystemEvent {
+  id        String   @id @default(cuid())
+  level     String   @default("info")
+  source    String
+  message   String
+  meta      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([level])
+  @@map("system_events")
+}
+
 // End of JARVIS schema — Standard Roofs AI Assistant

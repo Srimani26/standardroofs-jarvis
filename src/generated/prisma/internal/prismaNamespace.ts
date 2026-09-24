@@ -396,7 +396,8 @@ export const ModelName = {
   Conversation: 'Conversation',
   ActivityLog: 'ActivityLog',
   DailySummary: 'DailySummary',
-  UserSession: 'UserSession'
+  UserSession: 'UserSession',
+  SystemEvent: 'SystemEvent'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -412,7 +413,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "authUser" | "authSession" | "habit" | "habitCompletion" | "note" | "metric" | "reminder" | "memory" | "conversation" | "activityLog" | "dailySummary" | "userSession"
+    modelProps: "user" | "authUser" | "authSession" | "habit" | "habitCompletion" | "note" | "metric" | "reminder" | "memory" | "conversation" | "activityLog" | "dailySummary" | "userSession" | "systemEvent"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1378,6 +1379,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    SystemEvent: {
+      payload: Prisma.$SystemEventPayload<ExtArgs>
+      fields: Prisma.SystemEventFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.SystemEventFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.SystemEventFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>
+        }
+        findFirst: {
+          args: Prisma.SystemEventFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.SystemEventFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>
+        }
+        findMany: {
+          args: Prisma.SystemEventFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>[]
+        }
+        create: {
+          args: Prisma.SystemEventCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>
+        }
+        createMany: {
+          args: Prisma.SystemEventCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.SystemEventCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>[]
+        }
+        delete: {
+          args: Prisma.SystemEventDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>
+        }
+        update: {
+          args: Prisma.SystemEventUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>
+        }
+        deleteMany: {
+          args: Prisma.SystemEventDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.SystemEventUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.SystemEventUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>[]
+        }
+        upsert: {
+          args: Prisma.SystemEventUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SystemEventPayload>
+        }
+        aggregate: {
+          args: Prisma.SystemEventAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateSystemEvent>
+        }
+        groupBy: {
+          args: Prisma.SystemEventGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SystemEventGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.SystemEventCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SystemEventCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1575,6 +1650,18 @@ export const UserSessionScalarFieldEnum = {
 export type UserSessionScalarFieldEnum = (typeof UserSessionScalarFieldEnum)[keyof typeof UserSessionScalarFieldEnum]
 
 
+export const SystemEventScalarFieldEnum = {
+  id: 'id',
+  level: 'level',
+  source: 'source',
+  message: 'message',
+  meta: 'meta',
+  createdAt: 'createdAt'
+} as const
+
+export type SystemEventScalarFieldEnum = (typeof SystemEventScalarFieldEnum)[keyof typeof SystemEventScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -1739,6 +1826,7 @@ export type GlobalOmitConfig = {
   activityLog?: Prisma.ActivityLogOmit
   dailySummary?: Prisma.DailySummaryOmit
   userSession?: Prisma.UserSessionOmit
+  systemEvent?: Prisma.SystemEventOmit
 }
 
 /* Types for Logging */
