@@ -1,0 +1,15 @@
+{
+  "workspaceId": "d214c6fd-55de-4604-a816-732ad9b0f447",
+  "mounted": [
+    {
+      "id": "031393b2-190d-48a9-a1c8-5678a6ff7a45",
+      "name": "Jarvis AI Assistance",
+      "description": null,
+      "mounted": true,
+      "mountPath": "/app/workspace/031393b2-190d-48a9-a1c8-5678a6ff7a45",
+      "readonly": false
+    }
+  ],
+  "available": [],
+  "mounts": []
+}
