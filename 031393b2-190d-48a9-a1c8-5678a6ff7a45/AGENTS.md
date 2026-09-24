@@ -177,3 +177,163 @@ async function onSend() {
 ## Server wiring
 - `server.tsx` must mount `createVoiceHandlers()` from `@shogo-ai/sdk/voice/server` under `/api/voice/*`. In pod mode it auto-detects `RUNTIME_AUTH_SECRET` + `PROJECT_ID` and proxies to the Shogo API; in standalone/dev it falls back to BYO ElevenLabs.
 - Do NOT add custom auth middleware in front of `/api/voice/*` unless the app needs to gate voice behind its own session. The pod is already the capability boundary; any request that reaches the pod is trusted to act on the project.
+
+# ⚠️ CRITICAL — JARVIS auth transport (verified against the live proxy)
+
+**The pod's public proxy forwards ONLY the URL (path + query) to this app. It
+strips EVERY request header** — `Authorization`, `Cookie`, and all custom
+headers. This was verified by echoing the headers the API actually received:
+a request sent with `Authorization: Bearer …`, `Cookie: …`, `x-jarvis-token: …`
+and a custom header arrived carrying *none* of them (only `accept`,
+`accept-encoding`, `connection`, `host`, `user-agent`).
+
+**Consequence:** header-based auth can NEVER work through the public URL. If you
+add or change authentication, the session token MUST travel in the query string
+(`/api/…?token=<jwt>`), or in the POST body for state-changing calls.
+
+How it is wired today:
+- `custom-routes.ts` → `readToken(c)` accepts, in order: `Authorization: Bearer`,
+  `x-jarvis-token`, `x-auth-token`, `jarvis_token` cookie, then `?token=`.
+  Keep all of these — the header/cookie paths are what make direct calls
+  (curl, tests, other pods) work.
+- `src/lib/api.ts` → `authUrl()` appends `?token=` and a `fetch` shim is
+  installed once at module load, so **every** `/api/` call in the app carries
+  the token — including surfaces written later. Do not remove the shim, and do
+  not "clean up" the `?token=` from URLs: it is the only channel that survives.
+
+**If you ever see "API server not ready" or all authenticated calls 401:**
+1. `curl -s <public-url>/api/health` — must be JSON with `"status":"operational"`.
+   If it returns HTML, the API has no routes mounted (wrong app / stale build).
+2. `curl -s "<public-url>/api/auth/me?token=<jwt>"` — 200 means transport is fine;
+   401 means the token is not reaching the server.
+3. Never debug this by adding an `Authorization` header — it will always fail.
+
+# ⚠️ Database
+
+- `DATABASE_URL` is injected per-project by the runtime; it points at
+  `<project>/prisma/dev.db`. Never hardcode a DB path.
+- `ensureDatabaseSchema()` in `custom-routes.ts` self-heals a missing schema
+  (the `no such table: main.auth_users` crash that 500'd every login) using an
+  additive `prisma db push`. **Never** use `--force-reset` or
+  `--accept-data-loss` — those destroy the user's data.
+- Unknown `/api/*` paths return a JSON 404 on purpose. Do not remove that
+  catch-all: without it, unmatched API paths fall through to the SPA static
+  handler and return `index.html` with HTTP 200, which the client reports as
+  "API server not ready" while the server is perfectly healthy.
+
+# ⚠️ "Project Ready / Start building your app" on the live URL
+
+If anyone reports seeing the **blank scaffold** instead of this app, do NOT go
+hunting for a stale browser cache. It is not that. Diagnose it like this:
+
+```sh
+URL=https://<project-id>.preview.shogo.ai
+# Ask the same URL 30 times and count distinct bundle hashes:
+for i in $(seq 1 30); do curl -s "$URL/?cb=$RANDOM" \
+  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1; done | sort | uniq -c
+```
+
+- **One hash** → normal. Look elsewhere (the page really is the current build).
+- **More than one hash, or 200/404 flapping on the same asset** → the preview
+  host is answered by a **pool of backends with divergent `dist/` state**, some
+  left over from an earlier incarnation of this workspace. Those stale backends
+  serve *a different project's* HTML (watch for a foreign `/p/<other-id>/` in
+  the `<script src>`), which is what renders the blank scaffold.
+
+This is **infrastructure, not app code** — you cannot fix the stale backends
+from inside the project. What you can do:
+
+- Confirm the app itself is fine: `curl -s "$URL/api/health"` must be
+  `{"status":"operational",...}` and `/p/<our-id>/assets/<hash>.js` must
+  contain the real app.
+- `scripts/guard-dist.mjs` (wired into `npm run build`) quarantines any built
+  asset containing the blank-template marker, so a blank scaffold can never be
+  served from our own `dist/`. Keep it.
+- Clients get pinned per-connection to whichever backend their edge picked, so
+  one device can persistently see the blank page while another is fine. A new
+  connection (airplane mode on/off, Wi-Fi ↔ cellular) usually lands on a good
+  one.
+- The real fix is a **fresh hostname**: `publish` gives a clean URL with no
+  pool history behind it. Requires Pro+ (`plan_not_allowed` on Free/Basic).
+# ⚠️ AI ENGINE — how the model chain actually behaves
+
+Read this before changing anything in the `// AI ENGINE` section of
+`custom-routes.ts`. Every rule below was learned by testing the live gateway,
+not by reading docs.
+
+## The model chain is verified, never assumed
+
+`MODEL_CHAIN` must only ever contain ids that have been **watched answering**.
+Run `bun scripts/probe-models.mjs` to re-check the whole catalogue against the
+gateway. Two traps that already cost real debugging time:
+
+- **`gpt-5-nano` returns HTTP 200 with an EMPTY body.** It is not "unavailable",
+  so a naive check counts it as healthy — but it answers nothing. It was removed
+  from the chain for exactly this reason. Never re-add it without probing.
+- **Display names are rejected.** The gateway only accepts a model's `id`
+  (`claude-haiku-4-5`), except Hoshi 2.0 which is addressed by **UUID**, not by
+  its display name. `refreshModelCatalog()` re-resolves that UUID on every boot
+  so a hard-coded one can never silently rot.
+
+`refreshModelCatalog()` runs 2.5s after boot and re-probes every model in
+parallel (~1s). It is cached for 10 minutes and is also callable on demand via
+`POST /api/ai/models/refresh`. A model is marked healthy **only** because a
+probe just saw it answer.
+
+## Free vs Pro — do not "fix" a 403
+
+On the current plan these return **403 "requires a Pro or higher subscription"**:
+`claude-sonnet-5`, `claude-fable-5.1`, `gpt-5.5`, `gpt-6-astra`, `gpt-5`,
+`gpt-5-mini`, `gpt-4.1`, `gpt-4o`. They are listed in `PREMIUM_MODELS` for
+display only and are **never** used to answer a request. If a 403 shows up in
+logs it is a plan limit, not a bug — do not retry it (see below).
+
+## "Never fall back in the middle of work"
+
+A different model means a different voice, different formatting, different code
+quality. So the conversation is the unit that must stay stable:
+
+- `sessionModel` pins the model that last answered **per session**. `buildCandidateOrder()`
+  tries that model first on every later turn.
+- A **transient** error retries the SAME model once (400ms backoff) before moving on.
+- A **permanent** error (`isPermanentModelError`: 403/401/404, "not supported")
+  moves on immediately — retrying a plan limit only wastes the user's time.
+- An **empty response is a failure**, never a success. This is the bug class that
+  made the assistant look like it switched models at random.
+- If the chain DOES move, `switchedFrom` is returned and the UI prints
+  "*X stopped responding, so this reply came from Y*". A silent switch is a bug —
+  `scripts/verify-fallback.mjs` asserts this, including for premium and unknown ids.
+
+If you add a model, add it to the chain **and** to the probe. An unprobed id is
+an unverified claim.
+
+## The assistant reads real data and can act
+
+- `buildUserContext()` reads memories, notes, open reminders, habits, metrics and
+  recent activity from SQLite and injects them into the system prompt. Before
+  this, "personalisation" was a hard-coded paragraph — the model confidently
+  quoted stale facts and correctly said it had no access to Sri's notes.
+- `buildJarvisTools()` gives it real tool calling (`save_memory`, `search_memory`,
+  `create_note`, `list_notes`, `create_reminder`, `list_reminders`, `log_habit`,
+  `list_habits`, `log_metric`, `read_inbox`, `get_weather`, `search_news`,
+  `get_recent_activity`). All 6 chain models were verified to support tool calling.
+- Every tool pushes a summary into an `activity` array that the chat route returns
+  as `toolsUsed`, and `AIChat.tsx` renders it as an **"Actions taken"** block.
+  A claim of "done" must always be backed by a recorded action — if the model
+  says it did something and `toolsUsed` is empty, that is a prompt bug.
+- The system prompt no longer says "you can do ANYTHING". It lists the real tools
+  and states plainly what is impossible (send email, calendar, acting unprompted).
+  Keep it that way: an over-claiming prompt is why the assistant used to promise
+  email it could not send.
+
+## Verifying a change
+
+```bash
+bun x tsc --noEmit                      # 0 errors in app code expected
+bun scripts/probe-models.mjs            # every chain model answers
+bun scripts/verify-capabilities.mjs     # tools really write rows; memory is read back
+bun scripts/verify-fallback.mjs         # a dead/unknown model is reported, not silent
+```
+
+`verify-*.mjs` create a throwaway account and delete it in the same run. They must
+keep doing that — never leave probe rows in the live database.

@@ -12,6 +12,45 @@ import type {
   UserType,
   UserCreateInput,
   UserUpdateInput,
+  AuthUserType,
+  AuthUserCreateInput,
+  AuthUserUpdateInput,
+  AuthSessionType,
+  AuthSessionCreateInput,
+  AuthSessionUpdateInput,
+  HabitType,
+  HabitCreateInput,
+  HabitUpdateInput,
+  HabitCompletionType,
+  HabitCompletionCreateInput,
+  HabitCompletionUpdateInput,
+  NoteType,
+  NoteCreateInput,
+  NoteUpdateInput,
+  MetricType,
+  MetricCreateInput,
+  MetricUpdateInput,
+  ReminderType,
+  ReminderCreateInput,
+  ReminderUpdateInput,
+  MemoryType,
+  MemoryCreateInput,
+  MemoryUpdateInput,
+  ConversationType,
+  ConversationCreateInput,
+  ConversationUpdateInput,
+  ActivityLogType,
+  ActivityLogCreateInput,
+  ActivityLogUpdateInput,
+  DailySummaryType,
+  DailySummaryCreateInput,
+  DailySummaryUpdateInput,
+  UserSessionType,
+  UserSessionCreateInput,
+  UserSessionUpdateInput,
+  SystemEventType,
+  SystemEventCreateInput,
+  SystemEventUpdateInput,
 } from './types'
 
 /** Get the API base URL */
@@ -109,6 +148,1189 @@ export async function deleteUser(args: { data: { id: string; userId?: string } }
   if (!response.ok) {
     const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
     throw new Error(err.error?.message || 'Failed to delete User')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// AuthUser Client Functions
+// ============================================================================
+
+/**
+ * List all AuthUser records
+ */
+export async function getAuthUserList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<AuthUserType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/auth-users${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list AuthUser')
+  }
+  const json = await response.json()
+  return (json.items || []) as AuthUserType[]
+}
+
+/**
+ * Get a single AuthUser by ID
+ */
+export async function getAuthUserById(args: { data: { id: string; userId?: string } }): Promise<AuthUserType> {
+  const url = `${getApiBase()}/api/auth-users/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'AuthUser not found')
+  }
+  const json = await response.json()
+  return json.data as AuthUserType
+}
+
+/**
+ * Create a new AuthUser
+ */
+export async function createAuthUser(args: { data: { input: AuthUserCreateInput; userId?: string } }): Promise<AuthUserType> {
+  const url = `${getApiBase()}/api/auth-users`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create AuthUser')
+  }
+  const json = await response.json()
+  return json.data as AuthUserType
+}
+
+/**
+ * Update an existing AuthUser
+ */
+export async function updateAuthUser(args: { data: { id: string; input: AuthUserUpdateInput; userId?: string } }): Promise<AuthUserType> {
+  const url = `${getApiBase()}/api/auth-users/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update AuthUser')
+  }
+  const json = await response.json()
+  return json.data as AuthUserType
+}
+
+/**
+ * Delete a AuthUser
+ */
+export async function deleteAuthUser(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/auth-users/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete AuthUser')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// AuthSession Client Functions
+// ============================================================================
+
+/**
+ * List all AuthSession records
+ */
+export async function getAuthSessionList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<AuthSessionType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/auth-sessions${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list AuthSession')
+  }
+  const json = await response.json()
+  return (json.items || []) as AuthSessionType[]
+}
+
+/**
+ * Get a single AuthSession by ID
+ */
+export async function getAuthSessionById(args: { data: { id: string; userId?: string } }): Promise<AuthSessionType> {
+  const url = `${getApiBase()}/api/auth-sessions/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'AuthSession not found')
+  }
+  const json = await response.json()
+  return json.data as AuthSessionType
+}
+
+/**
+ * Create a new AuthSession
+ */
+export async function createAuthSession(args: { data: { input: AuthSessionCreateInput; userId?: string } }): Promise<AuthSessionType> {
+  const url = `${getApiBase()}/api/auth-sessions`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create AuthSession')
+  }
+  const json = await response.json()
+  return json.data as AuthSessionType
+}
+
+/**
+ * Update an existing AuthSession
+ */
+export async function updateAuthSession(args: { data: { id: string; input: AuthSessionUpdateInput; userId?: string } }): Promise<AuthSessionType> {
+  const url = `${getApiBase()}/api/auth-sessions/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update AuthSession')
+  }
+  const json = await response.json()
+  return json.data as AuthSessionType
+}
+
+/**
+ * Delete a AuthSession
+ */
+export async function deleteAuthSession(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/auth-sessions/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete AuthSession')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// Habit Client Functions
+// ============================================================================
+
+/**
+ * List all Habit records
+ */
+export async function getHabitList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<HabitType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/habits${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list Habit')
+  }
+  const json = await response.json()
+  return (json.items || []) as HabitType[]
+}
+
+/**
+ * Get a single Habit by ID
+ */
+export async function getHabitById(args: { data: { id: string; userId?: string } }): Promise<HabitType> {
+  const url = `${getApiBase()}/api/habits/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Habit not found')
+  }
+  const json = await response.json()
+  return json.data as HabitType
+}
+
+/**
+ * Create a new Habit
+ */
+export async function createHabit(args: { data: { input: HabitCreateInput; userId?: string } }): Promise<HabitType> {
+  const url = `${getApiBase()}/api/habits`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create Habit')
+  }
+  const json = await response.json()
+  return json.data as HabitType
+}
+
+/**
+ * Update an existing Habit
+ */
+export async function updateHabit(args: { data: { id: string; input: HabitUpdateInput; userId?: string } }): Promise<HabitType> {
+  const url = `${getApiBase()}/api/habits/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update Habit')
+  }
+  const json = await response.json()
+  return json.data as HabitType
+}
+
+/**
+ * Delete a Habit
+ */
+export async function deleteHabit(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/habits/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete Habit')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// HabitCompletion Client Functions
+// ============================================================================
+
+/**
+ * List all HabitCompletion records
+ */
+export async function getHabitCompletionList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<HabitCompletionType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/habit-completions${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list HabitCompletion')
+  }
+  const json = await response.json()
+  return (json.items || []) as HabitCompletionType[]
+}
+
+/**
+ * Get a single HabitCompletion by ID
+ */
+export async function getHabitCompletionById(args: { data: { id: string; userId?: string } }): Promise<HabitCompletionType> {
+  const url = `${getApiBase()}/api/habit-completions/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'HabitCompletion not found')
+  }
+  const json = await response.json()
+  return json.data as HabitCompletionType
+}
+
+/**
+ * Create a new HabitCompletion
+ */
+export async function createHabitCompletion(args: { data: { input: HabitCompletionCreateInput; userId?: string } }): Promise<HabitCompletionType> {
+  const url = `${getApiBase()}/api/habit-completions`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create HabitCompletion')
+  }
+  const json = await response.json()
+  return json.data as HabitCompletionType
+}
+
+/**
+ * Update an existing HabitCompletion
+ */
+export async function updateHabitCompletion(args: { data: { id: string; input: HabitCompletionUpdateInput; userId?: string } }): Promise<HabitCompletionType> {
+  const url = `${getApiBase()}/api/habit-completions/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update HabitCompletion')
+  }
+  const json = await response.json()
+  return json.data as HabitCompletionType
+}
+
+/**
+ * Delete a HabitCompletion
+ */
+export async function deleteHabitCompletion(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/habit-completions/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete HabitCompletion')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// Note Client Functions
+// ============================================================================
+
+/**
+ * List all Note records
+ */
+export async function getNoteList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<NoteType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/notes${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list Note')
+  }
+  const json = await response.json()
+  return (json.items || []) as NoteType[]
+}
+
+/**
+ * Get a single Note by ID
+ */
+export async function getNoteById(args: { data: { id: string; userId?: string } }): Promise<NoteType> {
+  const url = `${getApiBase()}/api/notes/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Note not found')
+  }
+  const json = await response.json()
+  return json.data as NoteType
+}
+
+/**
+ * Create a new Note
+ */
+export async function createNote(args: { data: { input: NoteCreateInput; userId?: string } }): Promise<NoteType> {
+  const url = `${getApiBase()}/api/notes`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create Note')
+  }
+  const json = await response.json()
+  return json.data as NoteType
+}
+
+/**
+ * Update an existing Note
+ */
+export async function updateNote(args: { data: { id: string; input: NoteUpdateInput; userId?: string } }): Promise<NoteType> {
+  const url = `${getApiBase()}/api/notes/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update Note')
+  }
+  const json = await response.json()
+  return json.data as NoteType
+}
+
+/**
+ * Delete a Note
+ */
+export async function deleteNote(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/notes/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete Note')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// Metric Client Functions
+// ============================================================================
+
+/**
+ * List all Metric records
+ */
+export async function getMetricList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<MetricType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/metrics${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list Metric')
+  }
+  const json = await response.json()
+  return (json.items || []) as MetricType[]
+}
+
+/**
+ * Get a single Metric by ID
+ */
+export async function getMetricById(args: { data: { id: string; userId?: string } }): Promise<MetricType> {
+  const url = `${getApiBase()}/api/metrics/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Metric not found')
+  }
+  const json = await response.json()
+  return json.data as MetricType
+}
+
+/**
+ * Create a new Metric
+ */
+export async function createMetric(args: { data: { input: MetricCreateInput; userId?: string } }): Promise<MetricType> {
+  const url = `${getApiBase()}/api/metrics`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create Metric')
+  }
+  const json = await response.json()
+  return json.data as MetricType
+}
+
+/**
+ * Update an existing Metric
+ */
+export async function updateMetric(args: { data: { id: string; input: MetricUpdateInput; userId?: string } }): Promise<MetricType> {
+  const url = `${getApiBase()}/api/metrics/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update Metric')
+  }
+  const json = await response.json()
+  return json.data as MetricType
+}
+
+/**
+ * Delete a Metric
+ */
+export async function deleteMetric(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/metrics/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete Metric')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// Reminder Client Functions
+// ============================================================================
+
+/**
+ * List all Reminder records
+ */
+export async function getReminderList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<ReminderType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/reminders${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list Reminder')
+  }
+  const json = await response.json()
+  return (json.items || []) as ReminderType[]
+}
+
+/**
+ * Get a single Reminder by ID
+ */
+export async function getReminderById(args: { data: { id: string; userId?: string } }): Promise<ReminderType> {
+  const url = `${getApiBase()}/api/reminders/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Reminder not found')
+  }
+  const json = await response.json()
+  return json.data as ReminderType
+}
+
+/**
+ * Create a new Reminder
+ */
+export async function createReminder(args: { data: { input: ReminderCreateInput; userId?: string } }): Promise<ReminderType> {
+  const url = `${getApiBase()}/api/reminders`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create Reminder')
+  }
+  const json = await response.json()
+  return json.data as ReminderType
+}
+
+/**
+ * Update an existing Reminder
+ */
+export async function updateReminder(args: { data: { id: string; input: ReminderUpdateInput; userId?: string } }): Promise<ReminderType> {
+  const url = `${getApiBase()}/api/reminders/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update Reminder')
+  }
+  const json = await response.json()
+  return json.data as ReminderType
+}
+
+/**
+ * Delete a Reminder
+ */
+export async function deleteReminder(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/reminders/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete Reminder')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// Memory Client Functions
+// ============================================================================
+
+/**
+ * List all Memory records
+ */
+export async function getMemoryList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<MemoryType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/memories${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list Memory')
+  }
+  const json = await response.json()
+  return (json.items || []) as MemoryType[]
+}
+
+/**
+ * Get a single Memory by ID
+ */
+export async function getMemoryById(args: { data: { id: string; userId?: string } }): Promise<MemoryType> {
+  const url = `${getApiBase()}/api/memories/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Memory not found')
+  }
+  const json = await response.json()
+  return json.data as MemoryType
+}
+
+/**
+ * Create a new Memory
+ */
+export async function createMemory(args: { data: { input: MemoryCreateInput; userId?: string } }): Promise<MemoryType> {
+  const url = `${getApiBase()}/api/memories`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create Memory')
+  }
+  const json = await response.json()
+  return json.data as MemoryType
+}
+
+/**
+ * Update an existing Memory
+ */
+export async function updateMemory(args: { data: { id: string; input: MemoryUpdateInput; userId?: string } }): Promise<MemoryType> {
+  const url = `${getApiBase()}/api/memories/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update Memory')
+  }
+  const json = await response.json()
+  return json.data as MemoryType
+}
+
+/**
+ * Delete a Memory
+ */
+export async function deleteMemory(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/memories/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete Memory')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// Conversation Client Functions
+// ============================================================================
+
+/**
+ * List all Conversation records
+ */
+export async function getConversationList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<ConversationType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/conversations${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list Conversation')
+  }
+  const json = await response.json()
+  return (json.items || []) as ConversationType[]
+}
+
+/**
+ * Get a single Conversation by ID
+ */
+export async function getConversationById(args: { data: { id: string; userId?: string } }): Promise<ConversationType> {
+  const url = `${getApiBase()}/api/conversations/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Conversation not found')
+  }
+  const json = await response.json()
+  return json.data as ConversationType
+}
+
+/**
+ * Create a new Conversation
+ */
+export async function createConversation(args: { data: { input: ConversationCreateInput; userId?: string } }): Promise<ConversationType> {
+  const url = `${getApiBase()}/api/conversations`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create Conversation')
+  }
+  const json = await response.json()
+  return json.data as ConversationType
+}
+
+/**
+ * Update an existing Conversation
+ */
+export async function updateConversation(args: { data: { id: string; input: ConversationUpdateInput; userId?: string } }): Promise<ConversationType> {
+  const url = `${getApiBase()}/api/conversations/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update Conversation')
+  }
+  const json = await response.json()
+  return json.data as ConversationType
+}
+
+/**
+ * Delete a Conversation
+ */
+export async function deleteConversation(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/conversations/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete Conversation')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// ActivityLog Client Functions
+// ============================================================================
+
+/**
+ * List all ActivityLog records
+ */
+export async function getActivityLogList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<ActivityLogType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/activity-logs${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list ActivityLog')
+  }
+  const json = await response.json()
+  return (json.items || []) as ActivityLogType[]
+}
+
+/**
+ * Get a single ActivityLog by ID
+ */
+export async function getActivityLogById(args: { data: { id: string; userId?: string } }): Promise<ActivityLogType> {
+  const url = `${getApiBase()}/api/activity-logs/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'ActivityLog not found')
+  }
+  const json = await response.json()
+  return json.data as ActivityLogType
+}
+
+/**
+ * Create a new ActivityLog
+ */
+export async function createActivityLog(args: { data: { input: ActivityLogCreateInput; userId?: string } }): Promise<ActivityLogType> {
+  const url = `${getApiBase()}/api/activity-logs`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create ActivityLog')
+  }
+  const json = await response.json()
+  return json.data as ActivityLogType
+}
+
+/**
+ * Update an existing ActivityLog
+ */
+export async function updateActivityLog(args: { data: { id: string; input: ActivityLogUpdateInput; userId?: string } }): Promise<ActivityLogType> {
+  const url = `${getApiBase()}/api/activity-logs/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update ActivityLog')
+  }
+  const json = await response.json()
+  return json.data as ActivityLogType
+}
+
+/**
+ * Delete a ActivityLog
+ */
+export async function deleteActivityLog(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/activity-logs/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete ActivityLog')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// DailySummary Client Functions
+// ============================================================================
+
+/**
+ * List all DailySummary records
+ */
+export async function getDailySummaryList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<DailySummaryType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/daily-summaries${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list DailySummary')
+  }
+  const json = await response.json()
+  return (json.items || []) as DailySummaryType[]
+}
+
+/**
+ * Get a single DailySummary by ID
+ */
+export async function getDailySummaryById(args: { data: { id: string; userId?: string } }): Promise<DailySummaryType> {
+  const url = `${getApiBase()}/api/daily-summaries/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'DailySummary not found')
+  }
+  const json = await response.json()
+  return json.data as DailySummaryType
+}
+
+/**
+ * Create a new DailySummary
+ */
+export async function createDailySummary(args: { data: { input: DailySummaryCreateInput; userId?: string } }): Promise<DailySummaryType> {
+  const url = `${getApiBase()}/api/daily-summaries`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create DailySummary')
+  }
+  const json = await response.json()
+  return json.data as DailySummaryType
+}
+
+/**
+ * Update an existing DailySummary
+ */
+export async function updateDailySummary(args: { data: { id: string; input: DailySummaryUpdateInput; userId?: string } }): Promise<DailySummaryType> {
+  const url = `${getApiBase()}/api/daily-summaries/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update DailySummary')
+  }
+  const json = await response.json()
+  return json.data as DailySummaryType
+}
+
+/**
+ * Delete a DailySummary
+ */
+export async function deleteDailySummary(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/daily-summaries/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete DailySummary')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// UserSession Client Functions
+// ============================================================================
+
+/**
+ * List all UserSession records
+ */
+export async function getUserSessionList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<UserSessionType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/user-sessions${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list UserSession')
+  }
+  const json = await response.json()
+  return (json.items || []) as UserSessionType[]
+}
+
+/**
+ * Get a single UserSession by ID
+ */
+export async function getUserSessionById(args: { data: { id: string; userId?: string } }): Promise<UserSessionType> {
+  const url = `${getApiBase()}/api/user-sessions/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'UserSession not found')
+  }
+  const json = await response.json()
+  return json.data as UserSessionType
+}
+
+/**
+ * Create a new UserSession
+ */
+export async function createUserSession(args: { data: { input: UserSessionCreateInput; userId?: string } }): Promise<UserSessionType> {
+  const url = `${getApiBase()}/api/user-sessions`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create UserSession')
+  }
+  const json = await response.json()
+  return json.data as UserSessionType
+}
+
+/**
+ * Update an existing UserSession
+ */
+export async function updateUserSession(args: { data: { id: string; input: UserSessionUpdateInput; userId?: string } }): Promise<UserSessionType> {
+  const url = `${getApiBase()}/api/user-sessions/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update UserSession')
+  }
+  const json = await response.json()
+  return json.data as UserSessionType
+}
+
+/**
+ * Delete a UserSession
+ */
+export async function deleteUserSession(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/user-sessions/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete UserSession')
+  }
+  return { success: true }
+}
+
+// ============================================================================
+// SystemEvent Client Functions
+// ============================================================================
+
+/**
+ * List all SystemEvent records
+ */
+export async function getSystemEventList(args: { data: { userId?: string; where?: Record<string, unknown> } }): Promise<SystemEventType[]> {
+  const params = new URLSearchParams()
+  if (args.data.userId) params.set('userId', args.data.userId)
+  if (args.data.where) {
+    for (const [key, value] of Object.entries(args.data.where)) {
+      if (value !== undefined && value !== null) params.set(key, String(value))
+    }
+  }
+  const qs = params.toString()
+  const url = `${getApiBase()}/api/system-events${qs ? `?${qs}` : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to list SystemEvent')
+  }
+  const json = await response.json()
+  return (json.items || []) as SystemEventType[]
+}
+
+/**
+ * Get a single SystemEvent by ID
+ */
+export async function getSystemEventById(args: { data: { id: string; userId?: string } }): Promise<SystemEventType> {
+  const url = `${getApiBase()}/api/system-events/${args.data.id}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'SystemEvent not found')
+  }
+  const json = await response.json()
+  return json.data as SystemEventType
+}
+
+/**
+ * Create a new SystemEvent
+ */
+export async function createSystemEvent(args: { data: { input: SystemEventCreateInput; userId?: string } }): Promise<SystemEventType> {
+  const url = `${getApiBase()}/api/system-events`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to create SystemEvent')
+  }
+  const json = await response.json()
+  return json.data as SystemEventType
+}
+
+/**
+ * Update an existing SystemEvent
+ */
+export async function updateSystemEvent(args: { data: { id: string; input: SystemEventUpdateInput; userId?: string } }): Promise<SystemEventType> {
+  const url = `${getApiBase()}/api/system-events/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args.data.input),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to update SystemEvent')
+  }
+  const json = await response.json()
+  return json.data as SystemEventType
+}
+
+/**
+ * Delete a SystemEvent
+ */
+export async function deleteSystemEvent(args: { data: { id: string; userId?: string } }): Promise<{ success: boolean }> {
+  const url = `${getApiBase()}/api/system-events/${args.data.id}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: response.statusText } }))
+    throw new Error(err.error?.message || 'Failed to delete SystemEvent')
   }
   return { success: true }
 }

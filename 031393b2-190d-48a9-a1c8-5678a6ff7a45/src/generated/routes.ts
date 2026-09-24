@@ -11,24 +11,115 @@ import { PrismaClient } from "./prisma/client"
 
 // Route imports
 import { createUserRoutes, setPrisma as setPrismaUser, setUserHooks } from "./user.routes"
+import { createAuthUserRoutes, setPrisma as setPrismaAuthUser, setAuthUserHooks } from "./auth-user.routes"
+import { createAuthSessionRoutes, setPrisma as setPrismaAuthSession, setAuthSessionHooks } from "./auth-session.routes"
+import { createHabitRoutes, setPrisma as setPrismaHabit, setHabitHooks } from "./habit.routes"
+import { createHabitCompletionRoutes, setPrisma as setPrismaHabitCompletion, setHabitCompletionHooks } from "./habit-completion.routes"
+import { createNoteRoutes, setPrisma as setPrismaNote, setNoteHooks } from "./note.routes"
+import { createMetricRoutes, setPrisma as setPrismaMetric, setMetricHooks } from "./metric.routes"
+import { createReminderRoutes, setPrisma as setPrismaReminder, setReminderHooks } from "./reminder.routes"
+import { createMemoryRoutes, setPrisma as setPrismaMemory, setMemoryHooks } from "./memory.routes"
+import { createConversationRoutes, setPrisma as setPrismaConversation, setConversationHooks } from "./conversation.routes"
+import { createActivityLogRoutes, setPrisma as setPrismaActivityLog, setActivityLogHooks } from "./activity-log.routes"
+import { createDailySummaryRoutes, setPrisma as setPrismaDailySummary, setDailySummaryHooks } from "./daily-summary.routes"
+import { createUserSessionRoutes, setPrisma as setPrismaUserSession, setUserSessionHooks } from "./user-session.routes"
+import { createSystemEventRoutes, setPrisma as setPrismaSystemEvent, setSystemEventHooks } from "./system-event.routes"
 
 // Hook imports
 import { userHooks } from "./user.hooks"
+import { authUserHooks } from "./auth-user.hooks"
+import { authSessionHooks } from "./auth-session.hooks"
+import { habitHooks } from "./habit.hooks"
+import { habitCompletionHooks } from "./habit-completion.hooks"
+import { noteHooks } from "./note.hooks"
+import { metricHooks } from "./metric.hooks"
+import { reminderHooks } from "./reminder.hooks"
+import { memoryHooks } from "./memory.hooks"
+import { conversationHooks } from "./conversation.hooks"
+import { activityLogHooks } from "./activity-log.hooks"
+import { dailySummaryHooks } from "./daily-summary.hooks"
+import { userSessionHooks } from "./user-session.hooks"
+import { systemEventHooks } from "./system-event.hooks"
 
 // Re-export route creators and setters
 export {
   createUserRoutes,
   setPrismaUser,
-  setUserHooks
+  setUserHooks,
+  createAuthUserRoutes,
+  setPrismaAuthUser,
+  setAuthUserHooks,
+  createAuthSessionRoutes,
+  setPrismaAuthSession,
+  setAuthSessionHooks,
+  createHabitRoutes,
+  setPrismaHabit,
+  setHabitHooks,
+  createHabitCompletionRoutes,
+  setPrismaHabitCompletion,
+  setHabitCompletionHooks,
+  createNoteRoutes,
+  setPrismaNote,
+  setNoteHooks,
+  createMetricRoutes,
+  setPrismaMetric,
+  setMetricHooks,
+  createReminderRoutes,
+  setPrismaReminder,
+  setReminderHooks,
+  createMemoryRoutes,
+  setPrismaMemory,
+  setMemoryHooks,
+  createConversationRoutes,
+  setPrismaConversation,
+  setConversationHooks,
+  createActivityLogRoutes,
+  setPrismaActivityLog,
+  setActivityLogHooks,
+  createDailySummaryRoutes,
+  setPrismaDailySummary,
+  setDailySummaryHooks,
+  createUserSessionRoutes,
+  setPrismaUserSession,
+  setUserSessionHooks,
+  createSystemEventRoutes,
+  setPrismaSystemEvent,
+  setSystemEventHooks
 }
 
 // Re-export hooks (model-specific)
 export {
-  userHooks
+  userHooks,
+  authUserHooks,
+  authSessionHooks,
+  habitHooks,
+  habitCompletionHooks,
+  noteHooks,
+  metricHooks,
+  reminderHooks,
+  memoryHooks,
+  conversationHooks,
+  activityLogHooks,
+  dailySummaryHooks,
+  userSessionHooks,
+  systemEventHooks
 }
 
 // Re-export hook types
 export type { UserHooks } from "./user.hooks"
+export type { AuthUserHooks } from "./auth-user.hooks"
+export type { AuthSessionHooks } from "./auth-session.hooks"
+export type { HabitHooks } from "./habit.hooks"
+export type { HabitCompletionHooks } from "./habit-completion.hooks"
+export type { NoteHooks } from "./note.hooks"
+export type { MetricHooks } from "./metric.hooks"
+export type { ReminderHooks } from "./reminder.hooks"
+export type { MemoryHooks } from "./memory.hooks"
+export type { ConversationHooks } from "./conversation.hooks"
+export type { ActivityLogHooks } from "./activity-log.hooks"
+export type { DailySummaryHooks } from "./daily-summary.hooks"
+export type { UserSessionHooks } from "./user-session.hooks"
+export type { SystemEventHooks } from "./system-event.hooks"
 
 /**
  * Create all routes and mount them on a single Hono app
@@ -38,12 +129,51 @@ export function createAllRoutes(prisma: PrismaClient): Hono {
 
   // Set Prisma client for all routes
   setPrismaUser(prisma)
+  setPrismaAuthUser(prisma)
+  setPrismaAuthSession(prisma)
+  setPrismaHabit(prisma)
+  setPrismaHabitCompletion(prisma)
+  setPrismaNote(prisma)
+  setPrismaMetric(prisma)
+  setPrismaReminder(prisma)
+  setPrismaMemory(prisma)
+  setPrismaConversation(prisma)
+  setPrismaActivityLog(prisma)
+  setPrismaDailySummary(prisma)
+  setPrismaUserSession(prisma)
+  setPrismaSystemEvent(prisma)
 
   // Set hooks for all routes
   setUserHooks(userHooks)
+  setAuthUserHooks(authUserHooks)
+  setAuthSessionHooks(authSessionHooks)
+  setHabitHooks(habitHooks)
+  setHabitCompletionHooks(habitCompletionHooks)
+  setNoteHooks(noteHooks)
+  setMetricHooks(metricHooks)
+  setReminderHooks(reminderHooks)
+  setMemoryHooks(memoryHooks)
+  setConversationHooks(conversationHooks)
+  setActivityLogHooks(activityLogHooks)
+  setDailySummaryHooks(dailySummaryHooks)
+  setUserSessionHooks(userSessionHooks)
+  setSystemEventHooks(systemEventHooks)
 
   // Mount routes
   app.route("/users", createUserRoutes())
+  app.route("/auth-users", createAuthUserRoutes())
+  app.route("/auth-sessions", createAuthSessionRoutes())
+  app.route("/habits", createHabitRoutes())
+  app.route("/habit-completions", createHabitCompletionRoutes())
+  app.route("/notes", createNoteRoutes())
+  app.route("/metrics", createMetricRoutes())
+  app.route("/reminders", createReminderRoutes())
+  app.route("/memories", createMemoryRoutes())
+  app.route("/conversations", createConversationRoutes())
+  app.route("/activity-logs", createActivityLogRoutes())
+  app.route("/daily-summaries", createDailySummaryRoutes())
+  app.route("/user-sessions", createUserSessionRoutes())
+  app.route("/system-events", createSystemEventRoutes())
 
   return app
 }

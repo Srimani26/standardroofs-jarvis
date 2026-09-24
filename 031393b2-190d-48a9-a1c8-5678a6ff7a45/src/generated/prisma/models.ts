@@ -9,4 +9,17 @@
  * 🟢 You can import this file directly.
  */
 export type * from './models/User'
+export type * from './models/AuthUser'
+export type * from './models/AuthSession'
+export type * from './models/Habit'
+export type * from './models/HabitCompletion'
+export type * from './models/Note'
+export type * from './models/Metric'
+export type * from './models/Reminder'
+export type * from './models/Memory'
+export type * from './models/Conversation'
+export type * from './models/ActivityLog'
+export type * from './models/DailySummary'
+export type * from './models/UserSession'
+export type * from './models/SystemEvent'
 export type * from './commonInputTypes'

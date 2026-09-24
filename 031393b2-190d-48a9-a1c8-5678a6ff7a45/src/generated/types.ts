@@ -19,6 +19,129 @@ export interface UserType {
   updatedAt: Date
 }
 
+export interface AuthUserType {
+  id: string
+  username: string
+  passwordHash: string
+  twoFactorSecret?: string
+  twoFactorEnabled: boolean
+  failedAttempts: number
+  lockedUntil?: Date
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface AuthSessionType {
+  id: string
+  userId: string
+  token: string
+  deviceInfo?: string
+  ipAddress?: string
+  expiresAt: Date
+  createdAt: Date
+}
+
+export interface HabitType {
+  id: string
+  name: string
+  icon?: string
+  color?: string
+  frequency: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface HabitCompletionType {
+  id: string
+  habitId: string
+  date: Date
+}
+
+export interface NoteType {
+  id: string
+  title?: string
+  content: string
+  category: string
+  mood?: string
+  tags?: string
+  pinned: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface MetricType {
+  id: string
+  name: string
+  value: number
+  unit?: string
+  category: string
+  date: Date
+  createdAt: Date
+}
+
+export interface ReminderType {
+  id: string
+  title: string
+  message?: string
+  remindAt: Date
+  completed: boolean
+  createdAt: Date
+}
+
+export interface MemoryType {
+  id: string
+  content: string
+  category: string
+  importance: number
+  tags?: string
+  metadata?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface ConversationType {
+  id: string
+  role: string
+  content: string
+  sessionId: string
+  createdAt: Date
+}
+
+export interface ActivityLogType {
+  id: string
+  action: string
+  details?: string
+  surface?: string
+  createdAt: Date
+}
+
+export interface DailySummaryType {
+  id: string
+  date: Date
+  summary: string
+  stats?: string
+  createdAt: Date
+}
+
+export interface UserSessionType {
+  id: string
+  deviceType?: string
+  deviceName?: string
+  ipAddress?: string
+  lastActive: Date
+  isActive: boolean
+  createdAt: Date
+}
+
+export interface SystemEventType {
+  id: string
+  level: string
+  source: string
+  message: string
+  meta?: string
+  createdAt: Date
+}
+
 // ============================================================================
 // Input Types
 // ============================================================================
@@ -31,6 +154,194 @@ export interface UserCreateInput {
 export interface UserUpdateInput {
   email?: string
   name?: string
+}
+
+export interface AuthUserCreateInput {
+  username: string
+  passwordHash: string
+  twoFactorSecret?: string
+  twoFactorEnabled?: boolean
+  failedAttempts?: number
+  lockedUntil?: Date
+}
+
+export interface AuthUserUpdateInput {
+  username?: string
+  passwordHash?: string
+  twoFactorSecret?: string
+  twoFactorEnabled?: boolean
+  failedAttempts?: number
+  lockedUntil?: Date
+}
+
+export interface AuthSessionCreateInput {
+  userId: string
+  token: string
+  deviceInfo?: string
+  ipAddress?: string
+  expiresAt: Date
+}
+
+export interface AuthSessionUpdateInput {
+  userId?: string
+  token?: string
+  deviceInfo?: string
+  ipAddress?: string
+  expiresAt?: Date
+}
+
+export interface HabitCreateInput {
+  name: string
+  icon?: string
+  color?: string
+  frequency?: string
+}
+
+export interface HabitUpdateInput {
+  name?: string
+  icon?: string
+  color?: string
+  frequency?: string
+}
+
+export interface HabitCompletionCreateInput {
+  habitId: string
+  date: Date
+}
+
+export interface HabitCompletionUpdateInput {
+  habitId?: string
+  date?: Date
+}
+
+export interface NoteCreateInput {
+  title?: string
+  content: string
+  category?: string
+  mood?: string
+  tags?: string
+  pinned?: boolean
+}
+
+export interface NoteUpdateInput {
+  title?: string
+  content?: string
+  category?: string
+  mood?: string
+  tags?: string
+  pinned?: boolean
+}
+
+export interface MetricCreateInput {
+  name: string
+  value: number
+  unit?: string
+  category?: string
+  date?: Date
+}
+
+export interface MetricUpdateInput {
+  name?: string
+  value?: number
+  unit?: string
+  category?: string
+  date?: Date
+}
+
+export interface ReminderCreateInput {
+  title: string
+  message?: string
+  remindAt: Date
+  completed?: boolean
+}
+
+export interface ReminderUpdateInput {
+  title?: string
+  message?: string
+  remindAt?: Date
+  completed?: boolean
+}
+
+export interface MemoryCreateInput {
+  content: string
+  category?: string
+  importance?: number
+  tags?: string
+  metadata?: string
+}
+
+export interface MemoryUpdateInput {
+  content?: string
+  category?: string
+  importance?: number
+  tags?: string
+  metadata?: string
+}
+
+export interface ConversationCreateInput {
+  role: string
+  content: string
+  sessionId: string
+}
+
+export interface ConversationUpdateInput {
+  role?: string
+  content?: string
+  sessionId?: string
+}
+
+export interface ActivityLogCreateInput {
+  action: string
+  details?: string
+  surface?: string
+}
+
+export interface ActivityLogUpdateInput {
+  action?: string
+  details?: string
+  surface?: string
+}
+
+export interface DailySummaryCreateInput {
+  date: Date
+  summary: string
+  stats?: string
+}
+
+export interface DailySummaryUpdateInput {
+  date?: Date
+  summary?: string
+  stats?: string
+}
+
+export interface UserSessionCreateInput {
+  deviceType?: string
+  deviceName?: string
+  ipAddress?: string
+  lastActive?: Date
+  isActive?: boolean
+}
+
+export interface UserSessionUpdateInput {
+  deviceType?: string
+  deviceName?: string
+  ipAddress?: string
+  lastActive?: Date
+  isActive?: boolean
+}
+
+export interface SystemEventCreateInput {
+  level?: string
+  source: string
+  message: string
+  meta?: string
+}
+
+export interface SystemEventUpdateInput {
+  level?: string
+  source?: string
+  message?: string
+  meta?: string
 }
 
 // ============================================================================
@@ -71,4 +382,17 @@ export interface ModelHooks<TCreate, TUpdate, TModel> {
 
 export interface ServerFunctionHooks {
   User?: ModelHooks<UserCreateInput, UserUpdateInput, UserType>
+  AuthUser?: ModelHooks<AuthUserCreateInput, AuthUserUpdateInput, AuthUserType>
+  AuthSession?: ModelHooks<AuthSessionCreateInput, AuthSessionUpdateInput, AuthSessionType>
+  Habit?: ModelHooks<HabitCreateInput, HabitUpdateInput, HabitType>
+  HabitCompletion?: ModelHooks<HabitCompletionCreateInput, HabitCompletionUpdateInput, HabitCompletionType>
+  Note?: ModelHooks<NoteCreateInput, NoteUpdateInput, NoteType>
+  Metric?: ModelHooks<MetricCreateInput, MetricUpdateInput, MetricType>
+  Reminder?: ModelHooks<ReminderCreateInput, ReminderUpdateInput, ReminderType>
+  Memory?: ModelHooks<MemoryCreateInput, MemoryUpdateInput, MemoryType>
+  Conversation?: ModelHooks<ConversationCreateInput, ConversationUpdateInput, ConversationType>
+  ActivityLog?: ModelHooks<ActivityLogCreateInput, ActivityLogUpdateInput, ActivityLogType>
+  DailySummary?: ModelHooks<DailySummaryCreateInput, DailySummaryUpdateInput, DailySummaryType>
+  UserSession?: ModelHooks<UserSessionCreateInput, UserSessionUpdateInput, UserSessionType>
+  SystemEvent?: ModelHooks<SystemEventCreateInput, SystemEventUpdateInput, SystemEventType>
 }

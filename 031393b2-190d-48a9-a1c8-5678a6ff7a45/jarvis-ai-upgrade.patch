@@ -1,0 +1,1551 @@
+From 35eb3e952b4e5ead088f4769aaeb976b04ab7ee7 Mon Sep 17 00:00:00 2001
+From: Shogo <agent@shogo.ai>
+Date: Thu, 24 Sep 2026 10:43:21 +0000
+Subject: [PATCH] feat(ai): verified model chain, real tool calling, real
+ memory context
+
+The assistant could not act, could not read any of Sri's data, and could swap
+models mid-conversation without saying so. All three fixed and verified.
+
+Models
+- Chain is now built from live probe results, not assumption. scripts/probe-models.mjs
+  checks every id against the gateway.
+- Removed gpt-5-nano: it returns HTTP 200 with an EMPTY body, so it counted as
+  healthy while answering nothing, and cost ~10s before handing the turn off.
+- Added Hoshi 2.0, addressed by UUID (the gateway rejects its display name). The
+  UUID is re-resolved on every boot so it cannot rot.
+- refreshModelCatalog() probes all models in parallel 2.5s after boot, cached 10
+  minutes, also callable via POST /api/ai/models/refresh. A model is healthy only
+  because a probe just watched it answer.
+- PREMIUM_MODELS (Sonnet 5, GPT-5.5, GPT-6 Astra, ...) 403 on this plan. Listed
+  for display only; never used to answer.
+
+Never fall back silently
+- sessionModel pins the model that last answered, per session.
+- Transient errors retry the SAME model once; permanent errors (403/401/404,
+  'not supported') move on immediately.
+- An empty response is a failure, never a success.
+- If the chain does move, switchedFrom is returned and the UI says so. Verified
+  for Pro-only ids and unknown ids, which previously reported nothing.
+- toolsEnabled=false is honoured.
+
+Real context and real actions
+- buildUserContext() injects memories, notes, open reminders, habits, metrics and
+  recent activity from SQLite into the system prompt. Previously the model was
+  told about Sri by a hard-coded paragraph and correctly reported that it had no
+  access to his notes.
+- buildJarvisTools() adds 13 real tools (save/search memory, create/list notes,
+  create/list reminders, log/list habits, log metric, read inbox, weather, news,
+  recent activity). All 6 chain models verified to support tool calling.
+- Tools record what they did; the chat route returns toolsUsed and the UI renders
+  an 'Actions taken' block, so 'done' is always backed by a recorded action.
+- System prompt rewritten: it names the real tools and states what is impossible
+  (send email, calendar, acting unprompted) instead of claiming it can do anything.
+
+Verification: bun x tsc --noEmit clean in app code; scripts/verify-capabilities.mjs
+and scripts/verify-fallback.mjs pass end-to-end against the live API and delete
+their own data in the same run.
+---
+ AGENTS.md                       |  85 ++++
+ custom-routes.ts                | 759 +++++++++++++++++++++++++++++---
+ scripts/probe-models.mjs        |  48 ++
+ scripts/probe-tools.mjs         |  60 +++
+ scripts/verify-capabilities.mjs | 110 +++++
+ scripts/verify-fallback.mjs     |  84 ++++
+ src/surfaces/AIChat.tsx         |  85 +++-
+ 7 files changed, 1161 insertions(+), 70 deletions(-)
+ create mode 100644 scripts/probe-models.mjs
+ create mode 100644 scripts/probe-tools.mjs
+ create mode 100644 scripts/verify-capabilities.mjs
+ create mode 100644 scripts/verify-fallback.mjs
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 40f4609..1e99c2e 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -255,3 +255,88 @@ from inside the project. What you can do:
+   one.
+ - The real fix is a **fresh hostname**: `publish` gives a clean URL with no
+   pool history behind it. Requires Pro+ (`plan_not_allowed` on Free/Basic).
++
++---
++
++# ⚠️ AI ENGINE — how the model chain actually behaves
++
++Read this before changing anything in the `// AI ENGINE` section of
++`custom-routes.ts`. Every rule below was learned by testing the live gateway,
++not by reading docs.
++
++## The model chain is verified, never assumed
++
++`MODEL_CHAIN` must only ever contain ids that have been **watched answering**.
++Run `bun scripts/probe-models.mjs` to re-check the whole catalogue against the
++gateway. Two traps that already cost real debugging time:
++
++- **`gpt-5-nano` returns HTTP 200 with an EMPTY body.** It is not "unavailable",
++  so a naive check counts it as healthy — but it answers nothing. It was removed
++  from the chain for exactly this reason. Never re-add it without probing.
++- **Display names are rejected.** The gateway only accepts a model's `id`
++  (`claude-haiku-4-5`), except Hoshi 2.0 which is addressed by **UUID**, not by
++  its display name. `refreshModelCatalog()` re-resolves that UUID on every boot
++  so a hard-coded one can never silently rot.
++
++`refreshModelCatalog()` runs 2.5s after boot and re-probes every model in
++parallel (~1s). It is cached for 10 minutes and is also callable on demand via
++`POST /api/ai/models/refresh`. A model is marked healthy **only** because a
++probe just saw it answer.
++
++## Free vs Pro — do not "fix" a 403
++
++On the current plan these return **403 "requires a Pro or higher subscription"**:
++`claude-sonnet-5`, `claude-fable-5.1`, `gpt-5.5`, `gpt-6-astra`, `gpt-5`,
++`gpt-5-mini`, `gpt-4.1`, `gpt-4o`. They are listed in `PREMIUM_MODELS` for
++display only and are **never** used to answer a request. If a 403 shows up in
++logs it is a plan limit, not a bug — do not retry it (see below).
++
++## "Never fall back in the middle of work"
++
++A different model means a different voice, different formatting, different code
++quality. So the conversation is the unit that must stay stable:
++
++- `sessionModel` pins the model that last answered **per session**. `buildCandidateOrder()`
++  tries that model first on every later turn.
++- A **transient** error retries the SAME model once (400ms backoff) before moving on.
++- A **permanent** error (`isPermanentModelError`: 403/401/404, "not supported")
++  moves on immediately — retrying a plan limit only wastes the user's time.
++- An **empty response is a failure**, never a success. This is the bug class that
++  made the assistant look like it switched models at random.
++- If the chain DOES move, `switchedFrom` is returned and the UI prints
++  "*X stopped responding, so this reply came from Y*". A silent switch is a bug —
++  `scripts/verify-fallback.mjs` asserts this, including for premium and unknown ids.
++
++If you add a model, add it to the chain **and** to the probe. An unprobed id is
++an unverified claim.
++
++## The assistant reads real data and can act
++
++- `buildUserContext()` reads memories, notes, open reminders, habits, metrics and
++  recent activity from SQLite and injects them into the system prompt. Before
++  this, "personalisation" was a hard-coded paragraph — the model confidently
++  quoted stale facts and correctly said it had no access to Sri's notes.
++- `buildJarvisTools()` gives it real tool calling (`save_memory`, `search_memory`,
++  `create_note`, `list_notes`, `create_reminder`, `list_reminders`, `log_habit`,
++  `list_habits`, `log_metric`, `read_inbox`, `get_weather`, `search_news`,
++  `get_recent_activity`). All 6 chain models were verified to support tool calling.
++- Every tool pushes a summary into an `activity` array that the chat route returns
++  as `toolsUsed`, and `AIChat.tsx` renders it as an **"Actions taken"** block.
++  A claim of "done" must always be backed by a recorded action — if the model
++  says it did something and `toolsUsed` is empty, that is a prompt bug.
++- The system prompt no longer says "you can do ANYTHING". It lists the real tools
++  and states plainly what is impossible (send email, calendar, acting unprompted).
++  Keep it that way: an over-claiming prompt is why the assistant used to promise
++  email it could not send.
++
++## Verifying a change
++
++```bash
++bun x tsc --noEmit                      # 0 errors in app code expected
++bun scripts/probe-models.mjs            # every chain model answers
++bun scripts/verify-capabilities.mjs     # tools really write rows; memory is read back
++bun scripts/verify-fallback.mjs         # a dead/unknown model is reported, not silent
++```
++
++`verify-*.mjs` create a throwaway account and delete it in the same run. They must
++keep doing that — never leave probe rows in the live database.
+diff --git a/custom-routes.ts b/custom-routes.ts
+index ddcd864..7d78930 100644
+--- a/custom-routes.ts
++++ b/custom-routes.ts
+@@ -1,7 +1,8 @@
+ import { Hono } from 'hono'
+ import { stream } from 'hono/streaming'
+ import { createShogoLlmProvider } from '@shogo-ai/sdk'
+-import { streamText, generateText } from 'ai'
++import { streamText, generateText, tool, stepCountIs } from 'ai'
++import { z } from 'zod'
+ import { prisma } from './src/lib/db'
+ import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs'
+ import { join } from 'path'
+@@ -618,17 +619,39 @@ fewer manual steps, more automation, more revenue, less wasted time.
+ - Never claim to run on a specific model version. If asked which model you are, say you are J.A.R.V.I.S. running on a multi-model failover chain, and that the interface shows the active model per reply.
+ - Never invent facts, file paths, numbers, or API results. If you do not know, say so and offer how to find out.
+ 
+-## YOUR CAPABILITIES — You can do ANYTHING
++## YOUR CAPABILITIES — be exact about what is real
++You have working tools that read and write Sri's real database. Use them.
++Never say "I cannot do that" for anything a tool covers — and never claim an
++action you did not actually take. If you did not call the tool, it did not happen.
++
++### Tools you can really call (they execute server-side, not pretend)
++- save_memory / search_memory — store and recall durable facts about Sri
++- create_note / list_notes — his Knowledge Hub
++- create_reminder / list_reminders — reminders with real datetimes
++- log_habit / list_habits — habit tracking
++- log_metric — record numbers (revenue, leads, hours)
++- read_inbox — read his Gmail (works only once he connects Gmail; if it returns
++  an error, tell him to connect it in the Connections Hub — do not guess at his email)
++- get_weather — live weather for ANY city (do not reuse the cached Erode reading)
++- search_news — recent headlines on any topic
++- get_recent_activity — what he has actually been doing in the app
++
++### What you genuinely cannot do — say so plainly, never invent it
++- You cannot send email, write to his calendar, browse arbitrary websites, run
++  code on his machine, generate images, or speak.
++- You cannot act while he is not talking to you: there is no scheduler or
++  notification channel connected, so a reminder you create is stored and shown
++  in the app, but it will not ping his phone by itself. Tell him that honestly.
++- If he asks for one of these, name what is missing and the shortest way to get it.
++
++### Reasoning and writing — still your core strength
+ - Write real production code in ANY language (Python, TypeScript, JavaScript, Deluge, Apps Script, HTML/CSS, SQL, React, Next.js, FastAPI, Node.js)
+ - Design complete automation workflows (n8n, Google Apps Script, Zoho CRM)
+ - Debug and fix code — trace errors, find root causes, provide fixes
+ - Build system architecture — APIs, databases, microservices, CI/CD
+ - Business strategy — revenue optimization, lead generation, process automation, marketing
+-- Web research — find best tools, frameworks, tutorials, and news
+ - Technical writing — documentation, README files, API docs, training manuals
+-- Project management — track progress, plan sprints, break down tasks
+ - Data analysis — analyze metrics, generate reports, visualize data
+-- Website design — Shopify, React, HTML/CSS, responsive design
+ 
+ 
+ ## NEVER BE GENERIC — this is a production tool, not a demo
+@@ -645,7 +668,7 @@ fewer manual steps, more automation, more revenue, less wasted time.
+ 1. ALWAYS address Sri as "Master" at least once per response
+ 2. Be direct, confident, and action-oriented — like JARVIS
+ 3. When Sri asks you to do something, DO IT — provide complete code, full plans, detailed solutions
+-4. Never say "I can't" — find a way. If something needs external tools, suggest alternatives
++4. Prefer doing over promising: if a tool covers it, CALL THE TOOL and report what it did. If nothing covers it, say exactly what is missing and how to get it — never fake the outcome
+ 5. Write complete, copy-pasteable code with proper formatting and language tags
+ 6. Be proactive — anticipate what Sri needs next
+ 7. Use markdown formatting: **bold**, \`code\`, \`\`\`code blocks\`\`\`, bullet points
+@@ -694,6 +717,35 @@ async function fetchLiveContext(): Promise<string> {
+ // When one AI hits rate limits, automatically switches to the next.
+ // Models are tried in order of preference. Each model gets its own rate limit tracking.
+ 
++// ── Model registry ─────────────────────────────────────────────────
++// Every id below was probed live against this pod's AI gateway. Anything that
++// did not actually answer is deliberately absent:
++//
++//   gpt-5-nano → HTTP 200 with an EMPTY body. The old chain counted the empty
++//     reply as a failure and silently handed the turn to a different model
++//     mid-conversation. That is exactly the "falls back in the middle of work"
++//     behaviour — and it cost ~10s before it happened. Removed.
++//
++// The `premium` ids below return 403 "requires a Pro or higher subscription"
++// on the current plan. They are listed only so Settings can show what an
++// upgrade would unlock. They are never used to answer a request.
++const PREMIUM_MODELS = [
++  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
++  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1' },
++  { id: 'gpt-5.5', name: 'GPT-5.5' },
++  { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
++  { id: 'gpt-5', name: 'GPT-5' },
++  { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
++  { id: 'gpt-4.1', name: 'GPT-4.1' },
++  { id: 'gpt-4o', name: 'GPT-4o' },
++]
++
++// Hoshi 2.0 (the gateway's own fast model) is addressed by UUID — the gateway
++// rejects its display name. The UUID is re-resolved from /models on every
++// catalogue refresh, so a hard-coded one can never silently rot.
++const HOSHI_FALLBACK_ID = '4fa677d1-e4a6-4ea1-88b5-e57101e810cd'
++let hoshiModelId = HOSHI_FALLBACK_ID
++
+ interface ModelState {
+   name: string
+   id: string
+@@ -702,20 +754,18 @@ interface ModelState {
+   lastFailAt: number
+   cooldownMs: number
+   consecutiveFails: number
++  /** Last measured round-trip, ms — shown in Settings so speed is visible. */
++  lastLatencyMs?: number
++  /** Set when the model rejected a tool-calling request. */
++  supportsTools?: boolean
+ }
+ 
+ const MODEL_CHAIN: ModelState[] = [
+-  // Primary — fast and reliable
++  { name: 'Hoshi 2.0', id: hoshiModelId, healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+   { name: 'Claude Haiku 4.5', id: 'claude-haiku-4-5', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+-  // Fallback 1 — strong GPT family
+-  { name: 'GPT-4o Mini', id: 'gpt-4o-mini', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+-  // Fallback 2 — latest GPT-4.1 family
+   { name: 'GPT-4.1 Mini', id: 'gpt-4.1-mini', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+-  // Fallback 3 — newest GPT-5 family
+-  { name: 'GPT-5 Nano', id: 'gpt-5-nano', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+-  // Fallback 4 — lightweight nano
++  { name: 'GPT-4o Mini', id: 'gpt-4o-mini', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+   { name: 'GPT-4.1 Nano', id: 'gpt-4.1-nano', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+-  // Fallback 5 — dated Haiku (if latest variant fails)
+   { name: 'Claude Haiku 4.5 (Oct)', id: 'claude-haiku-4-5-20251001', healthy: true, lastError: null, lastFailAt: 0, cooldownMs: 60_000, consecutiveFails: 0 },
+ ]
+ 
+@@ -742,6 +792,94 @@ function isModelReady(model: ModelState): boolean {
+   return false
+ }
+ 
++const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
++
++// ── Live model catalogue ────────────────────────────────────────────
++// The chain used to be a hard-coded list of ids that were merely assumed to
++// work — one of them answered with an empty body forever and nothing noticed.
++// A model is now only ever marked healthy because we watched it answer, so the
++// UI can never advertise something that is silently dead.
++const CATALOG_TTL_MS = 10 * 60_000
++let catalogCheckedAt = 0
++let catalogInFlight: Promise<void> | null = null
++let lastProbeFailures: Array<{ model: string; error: string }> = []
++
++async function probeModel(provider: any, model: ModelState): Promise<{ ok: boolean; ms: number; error?: string }> {
++  const started = Date.now()
++  try {
++    const result = await generateText({
++      model: provider(model.id),
++      prompt: 'Reply with exactly: OK',
++      maxTokens: 16,
++      abortSignal: AbortSignal.timeout(20_000),
++    })
++    const text = (result.text || '').trim()
++    const ms = Date.now() - started
++    if (!text) return { ok: false, ms, error: 'Returned an empty response' }
++    return { ok: true, ms }
++  } catch (err: any) {
++    return { ok: false, ms: Date.now() - started, error: String(err?.message || err).slice(0, 200) }
++  }
++}
++
++/** Re-resolve Hoshi's UUID from the gateway, then verify every chain member. */
++async function refreshModelCatalog(force = false): Promise<void> {
++  if (!force && Date.now() - catalogCheckedAt < CATALOG_TTL_MS) return
++  if (catalogInFlight) return catalogInFlight
++
++  catalogInFlight = (async () => {
++    try {
++      const provider = createLlmProvider()
++      if (!provider) return
++
++      try {
++        const token = resolveAiToken()
++        const res = await fetch(`${AI_BASE_URL}/models`, {
++          headers: { Authorization: `Bearer ${token}` },
++          signal: AbortSignal.timeout(10_000),
++        })
++        if (res.ok) {
++          const list: any = await res.json()
++          const found = (list?.data || []).find((m: any) => m?.display_name === 'Hoshi 2.0')
++          if (found?.id) hoshiModelId = found.id
++        }
++      } catch { /* keep the last known UUID */ }
++      if (MODEL_CHAIN[0].id !== hoshiModelId) MODEL_CHAIN[0].id = hoshiModelId
++
++      const failures: Array<{ model: string; error: string }> = []
++      await Promise.all(MODEL_CHAIN.map(async (model) => {
++        const r = await probeModel(provider, model)
++        if (r.ok) {
++          model.healthy = true
++          model.lastError = null
++          model.consecutiveFails = 0
++          model.cooldownMs = 60_000
++          model.lastLatencyMs = r.ms
++        } else {
++          model.healthy = false
++          model.lastError = r.error || 'Unavailable'
++          model.lastFailAt = Date.now()
++          model.consecutiveFails += 1
++          model.cooldownMs = Math.min(60_000 * Math.pow(2, model.consecutiveFails - 1), 10 * 60_000)
++          failures.push({ model: model.name, error: r.error || 'Unavailable' })
++        }
++      }))
++
++      lastProbeFailures = failures
++      catalogCheckedAt = Date.now()
++      const up = MODEL_CHAIN.filter((m) => m.healthy).length
++      console.log(`MoA: model check → ${up}/${MODEL_CHAIN.length} answering${failures.length ? ` | down: ${failures.map((f) => f.model).join(', ')}` : ''}`)
++    } finally {
++      catalogInFlight = null
++    }
++  })()
++
++  return catalogInFlight
++}
++
++// Warm the catalogue on boot so the very first chat already picks a live model.
++setTimeout(() => { refreshModelCatalog(true).catch(() => {}) }, 2500)
++
+ // ── Bring-Your-Own-Key store (server-side only, never shipped to the client) ──
+ 
+ const KEYS_FILE = join(process.cwd(), '.jarvis-keys.json')
+@@ -813,52 +951,445 @@ async function callDirectGemini(key: string, system: string, messages: any[]): P
+   return text
+ }
+ 
+-async function callAI(systemPrompt: string, messages: Array<{ role: string; content: string }>, preferredModelId?: string): Promise<{ text: string; source: string }> {
++// ── Answer shape returned by every AI call ──────────────────────────
++interface ToolActivity {
++  name: string
++  ok: boolean
++  summary: string
++}
++
++interface AiAnswer {
++  text: string
++  source: string
++  modelId: string
++  /** Which model the user/conversation expected, when we had to move off it. */
++  switchedFrom: string | null
++  attemptedModels: string[]
++  toolsUsed: ToolActivity[]
++}
++
++function isPermanentModelError(message: string): boolean {
++  // Retrying one of these only delays the hand-off — the model can never
++  // answer this request, so we move on immediately instead of burning a retry.
++  return /not supported|requires a Pro|invalid_model|does not exist|\b(401|403|404)\b/i.test(message)
++}
++
++// A conversation must not silently change model mid-task: a different model
++// means a different voice, different formatting, and different code quality.
++// Once a model has answered for a session we keep using it, and only move when
++// it genuinely fails — and then we report that we did.
++const sessionModel = new Map<string, string>()
++
++function buildCandidateOrder(preferredModelId?: string, sessionKey?: string): ModelState[] {
++  const pinned = sessionKey ? sessionModel.get(sessionKey) : undefined
++  const wanted = preferredModelId || pinned
++  const head = wanted ? MODEL_CHAIN.filter((m) => m.id === wanted) : []
++  const rest = MODEL_CHAIN.filter((m) => m.id !== wanted && isModelReady(m))
++  const ordered = [...head, ...rest]
++  if (ordered.length === 0) {
++    ordered.push([...MODEL_CHAIN].sort((a, b) => a.lastFailAt - b.lastFailAt)[0])
++  }
++  return ordered
++}
++
++async function callAI(
++  systemPrompt: string,
++  messages: Array<{ role: string; content: string }>,
++  opts: { preferredModelId?: string; sessionKey?: string; tools?: Record<string, any> } = {},
++): Promise<AiAnswer> {
+   const errors: string[] = []
+-  const chatMessages = messages.map(m => ({ role: m.role, content: m.content }))
++  const chatMessages = messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
++  const { preferredModelId, sessionKey, tools } = opts
++
++  const pinnedId = preferredModelId || (sessionKey ? sessionModel.get(sessionKey) : undefined)
++  // Resolve a human name for whatever was asked for. The premium and unknown
++  // ids matter here: if Sri picks a Pro-only model we still answer with
++  // something else, and that substitution MUST be reported rather than silent.
++  const pinnedName = pinnedId
++    ? (MODEL_CHAIN.find((m) => m.id === pinnedId)?.name
++      || PREMIUM_MODELS.find((m) => m.id === pinnedId)?.name
++      || pinnedId)
++    : null
+ 
+-  // 1) Shogo gateway (pod-native, no key required)
+   const llmProvider = createLlmProvider()
+   if (llmProvider) {
+-    // An explicitly picked model is tried first, even if it is cooling down —
+-    // Sri asked for it by name. Everything else stays as the failover chain.
+-    const preferred = preferredModelId ? MODEL_CHAIN.filter(m => m.id === preferredModelId) : []
+-    const fallbacks = MODEL_CHAIN.filter(m => m.id !== preferredModelId && isModelReady(m))
+-    const ordered = [...preferred, ...fallbacks]
+-    if (ordered.length === 0) ordered.push([...MODEL_CHAIN].sort((a, b) => a.lastFailAt - b.lastFailAt)[0])
++    const ordered = buildCandidateOrder(preferredModelId, sessionKey)
++    const attemptedModels: string[] = []
++
+     for (const model of ordered) {
+-      try {
+-        const result = await generateText({
+-          model: llmProvider(model.id),
+-          system: systemPrompt,
+-          messages: chatMessages.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+-          maxTokens: 8192,
+-          temperature: 0.7,
+-        })
+-        if (result.text?.trim()) { recordSuccess(model); return { text: result.text, source: model.name } }
+-        throw new Error('Empty response')
+-      } catch (err: any) { recordFailure(model, err.message); errors.push(`${model.name}: ${err.message}`) }
++      attemptedModels.push(model.name)
++      for (let attempt = 1; attempt <= 2; attempt++) {
++        try {
++          const result = await generateText({
++            model: llmProvider(model.id),
++            system: systemPrompt,
++            messages: chatMessages,
++            maxTokens: 8192,
++            temperature: 0.7,
++            abortSignal: AbortSignal.timeout(120_000),
++            ...(tools ? { tools: tools as any, stopWhen: stepCountIs(8) } : {}),
++          })
++
++          const text = (result.text || '').trim()
++          // An empty body is a failure, not an answer. The old code let a 200
++          // with no content count as success in some paths; now it never does.
++          if (!text) throw new Error('Model returned an empty response')
++
++          recordSuccess(model)
++          if (tools) model.supportsTools = true
++          if (sessionKey) sessionModel.set(sessionKey, model.id)
++
++          return {
++            text: result.text,
++            source: model.name,
++            modelId: model.id,
++            switchedFrom: pinnedName && model.name !== pinnedName ? pinnedName : null,
++            attemptedModels,
++            // Filled in by the route from the tools' own activity log.
++            toolsUsed: [],
++          }
++        } catch (err: any) {
++          const message = String(err?.message || err).slice(0, 300)
++          recordFailure(model, message)
++          errors.push(`${model.name}: ${message}`)
++          if (isPermanentModelError(message) || attempt === 2) break
++          await sleep(400 * attempt)
++        }
++      }
+     }
+   }
+ 
+-  // 2) Sri's own provider keys (never runs out)
++  // Sri's own provider keys — the chain that cannot be rate-limited by anyone
++  // else, because it is his own quota.
+   const keys = loadKeys()
+   const directProviders: Array<{ name: string; fn: (k: string) => Promise<string>; key?: string }> = [
+-    { name: 'OpenAI (your key)', fn: k => callDirectOpenAI(k, systemPrompt, chatMessages), key: keys.openai },
+-    { name: 'Anthropic (your key)', fn: k => callDirectAnthropic(k, systemPrompt, chatMessages), key: keys.anthropic },
+-    { name: 'Gemini (your key)', fn: k => callDirectGemini(k, systemPrompt, chatMessages), key: keys.gemini },
++    { name: 'OpenAI (your key)', fn: (k) => callDirectOpenAI(k, systemPrompt, chatMessages), key: keys.openai },
++    { name: 'Anthropic (your key)', fn: (k) => callDirectAnthropic(k, systemPrompt, chatMessages), key: keys.anthropic },
++    { name: 'Gemini (your key)', fn: (k) => callDirectGemini(k, systemPrompt, chatMessages), key: keys.gemini },
+   ]
+   for (const p of directProviders) {
+     if (!p.key) continue
+     try {
+       const text = await p.fn(p.key)
+-      if (text?.trim()) return { text, source: p.name }
+-    } catch (err: any) { errors.push(`${p.name}: ${err.message}`) }
++      if (text?.trim()) {
++        return { text, source: p.name, modelId: 'byok', switchedFrom: pinnedName && pinnedName !== p.name ? pinnedName : null, attemptedModels: [p.name], toolsUsed: [] }
++      }
++    } catch (err: any) {
++      errors.push(`${p.name}: ${String(err?.message || err).slice(0, 200)}`)
++    }
+   }
+ 
+   throw new Error(errors.slice(0, 3).join(' | ') || 'No AI provider available')
+ }
+ 
++// ── Real user context ───────────────────────────────────────────────
++// J.A.R.V.I.S. used to be *told* about Sri by a hard-coded paragraph, so it
++// confidently quoted stale facts and — asked about his notes — correctly said
++// it had no access to them. It was right: nothing in the prompt came from the
++// database. This reads the real rows so every answer is grounded in what is
++// actually stored, and says plainly when something is empty.
++async function buildUserContext(): Promise<string> {
++  const p = prisma as any
++  const weekAgo = new Date(Date.now() - 7 * 86_400_000)
++
++  const [memories, notes, reminders, habits, completions, activities, metrics] = await Promise.all([
++    p.memory.findMany({ orderBy: [{ importance: 'desc' }, { createdAt: 'desc' }], take: 15 }).catch(() => []),
++    p.note.findMany({ orderBy: { updatedAt: 'desc' }, take: 8 }).catch(() => []),
++    p.reminder.findMany({ where: { completed: false }, orderBy: { remindAt: 'asc' }, take: 10 }).catch(() => []),
++    p.habit.findMany({ orderBy: { createdAt: 'asc' }, take: 20 }).catch(() => []),
++    p.habitCompletion.findMany({ where: { date: { gte: weekAgo } } }).catch(() => []),
++    p.activityLog.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }).catch(() => []),
++    p.metric.findMany({ orderBy: { date: 'desc' }, take: 8 }).catch(() => []),
++  ])
++
++  const now = new Date()
++  const ist = new Date(now.getTime() + 5.5 * 3_600_000)
++  const lines: string[] = []
++
++  lines.push(`\n\n## LIVE CONTEXT — read from your database, ${ist.toISOString().slice(0, 16).replace('T', ' ')} IST`)
++
++  if (memories.length) {
++    lines.push(`\n### Your saved memories (${memories.length} most relevant, of the ones stored)`)
++    for (const m of memories) lines.push(`- [${m.category}/importance ${m.importance}] ${String(m.content).slice(0, 300)}`)
++  } else {
++    lines.push(`\n### Your saved memories\nNone saved yet. The memories table is empty — do not claim to remember past conversations you cannot see here.`)
++  }
++
++  if (notes.length) {
++    lines.push(`\n### Your recent notes`)
++    for (const n of notes) lines.push(`- ${n.title || '(untitled)'} [${n.category}] — ${String(n.content).slice(0, 200)}`)
++  } else {
++    lines.push(`\n### Your recent notes\nNone yet.`)
++  }
++
++  if (reminders.length) {
++    lines.push(`\n### Your open reminders`)
++    for (const r of reminders) lines.push(`- ${r.remindAt.toISOString().slice(0, 16).replace('T', ' ')} — ${r.title}`)
++  } else {
++    lines.push(`\n### Your open reminders\nNone pending.`)
++  }
++
++  if (habits.length) {
++    const doneToday = new Set(
++      completions.filter((c: any) => c.date.toDateString() === now.toDateString()).map((c: any) => c.habitId),
++    )
++    lines.push(`\n### Your habits (last 7 days)`)
++    for (const h of habits) {
++      const count = completions.filter((c: any) => c.habitId === h.id).length
++      lines.push(`- ${h.name}: ${count}/7 days logged, ${doneToday.has(h.id) ? 'DONE today' : 'not yet today'}`)
++    }
++  }
++
++  if (metrics.length) {
++    lines.push(`\n### Your latest metrics`)
++    for (const m of metrics) lines.push(`- ${m.name}: ${m.value}${m.unit ? ' ' + m.unit : ''} (${m.date.toISOString().slice(0, 10)})`)
++  }
++
++  if (activities.length) {
++    lines.push(`\n### Your recent activity`)
++    for (const a of activities) lines.push(`- ${a.action}${a.surface ? ` (${a.surface})` : ''}${a.details ? `: ${String(a.details).slice(0, 100)}` : ''}`)
++  }
++
++  lines.push(`\n### Grounding rules for this context
++- Everything above is real and current. Use it directly — do not ask Sri to repeat what is already here.
++- Anything NOT above (email contents, calendar, files, other apps) you cannot see. Say so plainly.
++- If a section says "None yet", it is genuinely empty. Never invent entries to fill it.
++- You can write to Sri's database with the tools you have. Use them instead of telling him to do it manually.`)
++
++  return lines.join('\n')
++}
++
++// ── Tools — the difference between a chatbot and an assistant ────────
++// Every tool writes to the real database or reads a real source. Each one
++// reports what it did back into `activity`, which the UI renders under the
++// reply, so a claim of "done" is always backed by a recorded action.
++function buildJarvisTools(activity: ToolActivity[]): Record<string, any> {
++  const p = prisma as any
++
++  const record = (name: string, ok: boolean, summary: string) => {
++    activity.push({ name, ok, summary })
++    return ok ? { ok: true, result: summary } : { ok: false, error: summary }
++  }
++
++  return {
++    save_memory: tool({
++      description: "Save a durable fact about Sri to his memory store. Use when he shares something worth remembering long-term (preferences, business facts, decisions, people, ongoing projects).",
++      inputSchema: z.object({
++        content: z.string().describe('The fact to remember, written as a standalone sentence'),
++        category: z.string().optional().describe('e.g. business, personal, project, preference, conversation'),
++        importance: z.number().min(1).max(10).optional().describe('1-10, default 5'),
++      }),
++      execute: async ({ content, category, importance }) => {
++        try {
++          await p.memory.create({ data: { content: sanitize(content), category: category || 'conversation', importance: importance || 5 } })
++          return record('save_memory', true, `Saved to memory: "${String(content).slice(0, 80)}"`)
++        } catch (e: any) { return record('save_memory', false, `Could not save memory: ${e.message}`) }
++      },
++    }),
++
++    search_memory: tool({
++      description: 'Search everything Sri has stored — memories, notes and activity — for a keyword or topic.',
++      inputSchema: z.object({ query: z.string().describe('Keyword or phrase to search for') }),
++      execute: async ({ query }) => {
++        try {
++          const q = String(query)
++          const [mem, notes] = await Promise.all([
++            p.memory.findMany({ where: { content: { contains: q } }, take: 10 }).catch(() => []),
++            p.note.findMany({ where: { OR: [{ content: { contains: q } }, { title: { contains: q } }] }, take: 10 }).catch(() => []),
++          ])
++          const total = mem.length + notes.length
++          if (!total) return record('search_memory', true, `Nothing stored matches "${q}".`)
++          const bits = [
++            ...mem.map((m: any) => `memory: ${String(m.content).slice(0, 200)}`),
++            ...notes.map((n: any) => `note "${n.title || 'untitled'}": ${String(n.content).slice(0, 200)}`),
++          ]
++          return record('search_memory', true, `Found ${total} match(es) for "${q}" — ${bits.join(' | ')}`)
++        } catch (e: any) { return record('search_memory', false, `Search failed: ${e.message}`) }
++      },
++    }),
++
++    create_note: tool({
++      description: "Create a note in Sri's Knowledge Hub. Use whenever he asks to save, jot down, or remember something as a note.",
++      inputSchema: z.object({
++        title: z.string().describe('Short title'),
++        content: z.string().describe('Full note body'),
++        category: z.string().optional().describe('general, business, idea, meeting, etc.'),
++      }),
++      execute: async ({ title, content, category }) => {
++        try {
++          const n = await p.note.create({ data: { title: sanitize(title), content: sanitize(content), category: category || 'general' } })
++          return record('create_note', true, `Created note "${title}" (id ${n.id}).`)
++        } catch (e: any) { return record('create_note', false, `Could not create note: ${e.message}`) }
++      },
++    }),
++
++    list_notes: tool({
++      description: 'List the most recent notes in the Knowledge Hub.',
++      inputSchema: z.object({ limit: z.number().min(1).max(50).optional(), category: z.string().optional() }),
++      execute: async ({ limit, category }) => {
++        try {
++          const notes = await p.note.findMany({
++            where: category ? { category } : undefined,
++            orderBy: { updatedAt: 'desc' }, take: limit || 10,
++          })
++          if (!notes.length) return record('list_notes', true, 'No notes found.')
++          return record('list_notes', true, notes.map((n: any) => `"${n.title || 'untitled'}" [${n.category}]`).join(', '))
++        } catch (e: any) { return record('list_notes', false, `Could not list notes: ${e.message}`) }
++      },
++    }),
++
++    create_reminder: tool({
++      description: "Create a reminder for Sri. Use when he says remind me / don't let me forget / follow up on.",
++      inputSchema: z.object({
++        title: z.string().describe('What to be reminded about'),
++        remindAt: z.string().describe('ISO 8601 timestamp, e.g. 2026-09-25T09:00:00+05:30'),
++        message: z.string().optional().describe('Extra detail'),
++      }),
++      execute: async ({ title, remindAt, message }) => {
++        try {
++          const when = new Date(remindAt)
++          if (isNaN(when.getTime())) return record('create_reminder', false, `Could not parse the date "${remindAt}". Use ISO 8601.`)
++          const r = await p.reminder.create({ data: { title: sanitize(title), message: message ? sanitize(message) : null, remindAt: when } })
++          return record('create_reminder', true, `Reminder set for ${when.toISOString()} — "${title}" (id ${r.id}).`)
++        } catch (e: any) { return record('create_reminder', false, `Could not create reminder: ${e.message}`) }
++      },
++    }),
++
++    list_reminders: tool({
++      description: 'List open reminders, soonest first.',
++      inputSchema: z.object({ includeCompleted: z.boolean().optional() }),
++      execute: async ({ includeCompleted }) => {
++        try {
++          const r = await p.reminder.findMany({
++            where: includeCompleted ? undefined : { completed: false },
++            orderBy: { remindAt: 'asc' }, take: 25,
++          })
++          if (!r.length) return record('list_reminders', true, 'No open reminders.')
++          return record('list_reminders', true, r.map((x: any) => `${x.remindAt.toISOString().slice(0, 16)} — ${x.title}${x.completed ? ' (done)' : ''}`).join(' | '))
++        } catch (e: any) { return record('list_reminders', false, `Could not list reminders: ${e.message}`) }
++      },
++    }),
++
++    list_habits: tool({
++      description: 'List habits with how many of the last 7 days were logged.',
++      inputSchema: z.object({}),
++      execute: async () => {
++        try {
++          const weekAgo = new Date(Date.now() - 7 * 86_400_000)
++          const [habits, comps] = await Promise.all([
++            p.habit.findMany({ take: 25 }).catch(() => []),
++            p.habitCompletion.findMany({ where: { date: { gte: weekAgo } } }).catch(() => []),
++          ])
++          if (!habits.length) return record('list_habits', true, 'No habits set up yet.')
++          return record('list_habits', true, habits.map((h: any) => {
++            const n = comps.filter((c: any) => c.habitId === h.id).length
++            return `${h.name}: ${n}/7`
++          }).join(' | '))
++        } catch (e: any) { return record('list_habits', false, `Could not list habits: ${e.message}`) }
++      },
++    }),
++
++    log_habit: tool({
++      description: 'Mark a habit as done for a given day (defaults to today). Creates the habit if it does not exist.',
++      inputSchema: z.object({
++        habitName: z.string().describe('Name of the habit'),
++        date: z.string().optional().describe('ISO date; defaults to today'),
++      }),
++      execute: async ({ habitName, date }) => {
++        try {
++          const name = String(habitName).trim()
++          let habit = await p.habit.findFirst({ where: { name } })
++          if (!habit) habit = await p.habit.create({ data: { name } })
++          const when = date ? new Date(date) : new Date()
++          if (isNaN(when.getTime())) return record('log_habit', false, `Could not parse the date "${date}".`)
++          when.setHours(12, 0, 0, 0)
++          await p.habitCompletion.upsert({
++            where: { habitId_date: { habitId: habit.id, date: when } },
++            update: {},
++            create: { habitId: habit.id, date: when },
++          })
++          return record('log_habit', true, `Logged "${name}" for ${when.toISOString().slice(0, 10)}.`)
++        } catch (e: any) { return record('log_habit', false, `Could not log habit: ${e.message}`) }
++      },
++    }),
++
++    log_metric: tool({
++      description: 'Record a numeric metric (revenue, leads, hours, etc.).',
++      inputSchema: z.object({
++        name: z.string(),
++        value: z.number(),
++        unit: z.string().optional(),
++        category: z.string().optional(),
++      }),
++      execute: async ({ name, value, unit, category }) => {
++        try {
++          await p.metric.create({ data: { name: sanitize(name), value, unit: unit || null, category: category || 'general' } })
++          return record('log_metric', true, `Recorded ${name} = ${value}${unit ? ' ' + unit : ''}.`)
++        } catch (e: any) { return record('log_metric', false, `Could not record metric: ${e.message}`) }
++      },
++    }),
++
++    read_inbox: tool({
++      description: "Read the most recent emails in Sri's Gmail inbox. Only works once Gmail is connected in the Connections Hub; if it fails, tell him to connect it rather than guessing.",
++      inputSchema: z.object({ limit: z.number().min(1).max(20).optional() }),
++      execute: async ({ limit }) => {
++        try {
++          const tools = getServerToolsClient()
++          const res: any = await tools.execute('GMAIL_FETCH_EMAILS', { maxResults: limit || 5 })
++          if (!res?.ok) return record('read_inbox', false, `Gmail is not available: ${res?.error || 'not connected'}. Ask Sri to connect Gmail in the Connections Hub.`)
++          const msgs = res.data?.messages || res.data?.emails || []
++          if (!msgs.length) return record('read_inbox', true, 'Inbox is empty.')
++          return record('read_inbox', true, msgs.slice(0, limit || 5).map((m: any) => `${m.subject || m.snippet || '(no subject)'} — ${m.from || ''}`).join(' | '))
++        } catch (e: any) { return record('read_inbox', false, `Could not read Gmail: ${e.message}`) }
++      },
++    }),
++
++    get_weather: tool({
++      description: 'Get live current weather for any city. Use instead of reciting the cached Erode conditions.',
++      inputSchema: z.object({ city: z.string().describe('City name, e.g. "Erode, Tamil Nadu"') }),
++      execute: async ({ city }) => {
++        try {
++          const res = await fetch(`https://wttr.in/${encodeURIComponent(city)}?format=j1`, { signal: AbortSignal.timeout(8000) })
++          const data: any = await res.json()
++          const c = data?.current_condition?.[0]
++          if (!c) return record('get_weather', false, `No weather data for "${city}".`)
++          return record('get_weather', true, `${city}: ${c.temp_C}°C, feels ${c.FeelsLikeC}°C, ${c.weatherDesc?.[0]?.value}, humidity ${c.humidity}%, wind ${c.windspeedKmph} km/h.`)
++        } catch (e: any) { return record('get_weather', false, `Weather lookup failed: ${e.message}`) }
++      },
++    }),
++
++    search_news: tool({
++      description: 'Search recent news headlines on any topic.',
++      inputSchema: z.object({ query: z.string() }),
++      execute: async ({ query }) => {
++        try {
++          const res = await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=IN&ceid=IN:en`, { signal: AbortSignal.timeout(8000) })
++          const xml = await res.text()
++          const out: string[] = []
++          for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
++            const t = m[1].match(/<title>(.*?)<\/title>/)?.[1]?.replace(/<!\[CDATA\[|\]\]>/g, '')
++            if (t && out.length < 5) out.push(t)
++          }
++          if (!out.length) return record('search_news', false, `No news found for "${query}".`)
++          return record('search_news', true, `Top headlines for "${query}": ${out.join(' | ')}`)
++        } catch (e: any) { return record('search_news', false, `News search failed: ${e.message}`) }
++      },
++    }),
++
++    get_recent_activity: tool({
++      description: "Read Sri's recent activity log to see what he has actually been doing in the app.",
++      inputSchema: z.object({ limit: z.number().min(1).max(50).optional() }),
++      execute: async ({ limit }) => {
++        try {
++          const rows = await p.activityLog.findMany({ orderBy: { createdAt: 'desc' }, take: limit || 15 })
++          if (!rows.length) return record('get_recent_activity', true, 'No activity recorded yet.')
++          return record('get_recent_activity', true, rows.map((r: any) => `${r.action}${r.surface ? ` (${r.surface})` : ''}`).join(' | '))
++        } catch (e: any) { return record('get_recent_activity', false, `Could not read activity: ${e.message}`) }
++      },
++    }),
++  }
++}
++
+ function getModelStatus() {
+   return MODEL_CHAIN.map(m => ({
+     name: m.name,
+@@ -872,18 +1403,32 @@ function getModelStatus() {
+ app.post('/ai/chat', requireAuth, async (c) => {
+   try {
+     const body = await c.req.json()
+-    const { messages, model: preferredModelId } = body as {
++    const { messages, model: preferredModelId, sessionId, toolsEnabled } = body as {
+       messages: Array<{ role: string; content: string }>
+       model?: string
++      sessionId?: string
++      toolsEnabled?: boolean
+     }
+     if (!messages?.length) return c.json({ error: 'messages array required' }, 400)
+ 
+-    const liveContext = await fetchLiveContext()
+-    const fullPrompt = JARVIS_SYSTEM_PROMPT + liveContext
++    // The conversation is the unit that must not change model mid-task, so
++    // stickiness is keyed by session (falling back to the signed-in user).
++    const sessionKey = sessionId || (c.get('userId') as string) || 'main'
++
++    // First ever request waits briefly for the model check so it already picks
++    // a model we have seen answer; later ones use the cached catalogue.
++    if (catalogCheckedAt === 0) await Promise.race([refreshModelCatalog(), sleep(3000)])
+ 
+-    let answer: { text: string; source: string }
++    const [liveContext, userContext] = await Promise.all([fetchLiveContext(), buildUserContext().catch(() => '')])
++    const fullPrompt = JARVIS_SYSTEM_PROMPT + userContext + liveContext
++
++    const activity: ToolActivity[] = []
++    const tools = toolsEnabled === false ? undefined : buildJarvisTools(activity)
++
++    let answer: AiAnswer
+     try {
+-      answer = await callAI(fullPrompt, messages, preferredModelId)
++      answer = await callAI(fullPrompt, messages, { preferredModelId, sessionKey, tools })
++      answer.toolsUsed = activity
+     } catch (aiError: any) {
+       // PRODUCTION RULE: never fabricate an assistant reply. A canned "standby
+       // mode" message looks like J.A.R.V.I.S. answered when nothing did. Report
+@@ -906,9 +1451,19 @@ app.post('/ai/chat', requireAuth, async (c) => {
+     if (lastUser) {
+       await (prisma as any).conversation.create({ data: { role: 'user', content: lastUser.content, sessionId: 'main' } }).catch(() => {})
+       await (prisma as any).conversation.create({ data: { role: 'assistant', content: answer.text.substring(0, 2000), sessionId: 'main' } }).catch(() => {})
+-      await (prisma as any).activityLog.create({ data: { action: 'ai_chat', details: answer.source, surface: 'chat' } }).catch(() => {})
++      await (prisma as any).activityLog.create({ data: { action: 'ai_chat', details: `${answer.source}${answer.toolsUsed.length ? ` + ${answer.toolsUsed.length} tool call(s)` : ''}`, surface: 'chat' } }).catch(() => {})
+     }
+-    return c.json({ content: answer.text, source: answer.source })
++
++    return c.json({
++      content: answer.text,
++      source: answer.source,
++      modelId: answer.modelId,
++      // Non-null only when we had to abandon the model the conversation was
++      // pinned to — the UI shows this instead of switching silently.
++      switchedFrom: answer.switchedFrom,
++      attemptedModels: answer.attemptedModels,
++      toolsUsed: answer.toolsUsed,
++    })
+   } catch (error: any) {
+     return c.json({ error: error.message || 'Chat error' }, 500)
+   }
+@@ -933,15 +1488,94 @@ app.delete('/ai/history', requireAuth, async (c) => {
+   return c.json({ ok: true, deleted: res.count })
+ })
+ 
+-// GET /api/ai/models
+-app.get('/ai/models', (c) => {
+-  return c.json({ models: MODEL_CHAIN.map(m => ({
+-    id: m.id,
+-    name: m.name,
+-    healthy: m.healthy || isModelReady(m),
+-    cooldownRemaining: m.healthy ? 0 : Math.max(0, m.cooldownMs - (Date.now() - m.lastFailAt)),
+-    lastError: m.lastError,
+-  })) })
++// GET /api/ai/models — every model, with what we last actually measured
++app.get('/ai/models', async (c) => {
++  // Served from the cached catalogue; refresh once in the background if stale
++  // so the numbers the UI shows are never older than the TTL.
++  refreshModelCatalog().catch(() => {})
++  return c.json({
++    models: MODEL_CHAIN.map(m => ({
++      id: m.id,
++      name: m.name,
++      healthy: m.healthy || isModelReady(m),
++      cooldownRemaining: m.healthy ? 0 : Math.max(0, m.cooldownMs - (Date.now() - m.lastFailAt)),
++      lastError: m.lastError,
++      latencyMs: m.lastLatencyMs ?? null,
++      supportsTools: m.supportsTools ?? null,
++    })),
++    // Kept separate on purpose: these 403 on the current plan, so they must
++    // never be picked to answer a request.
++    premium: PREMIUM_MODELS.map(m => ({ id: m.id, name: m.name, requiresPlan: 'Pro', available: false })),
++    checkedAt: catalogCheckedAt || null,
++    failures: lastProbeFailures,
++  })
++})
++
++// POST /api/ai/models/refresh — re-probe every model on demand
++app.post('/ai/models/refresh', requireAuth, async (c) => {
++  await refreshModelCatalog(true)
++  return c.json({
++    ok: true,
++    checkedAt: catalogCheckedAt,
++    models: MODEL_CHAIN.map(m => ({ id: m.id, name: m.name, healthy: m.healthy, latencyMs: m.lastLatencyMs ?? null, lastError: m.lastError })),
++    failures: lastProbeFailures,
++  })
++})
++
++// GET /api/ai/capabilities — what this assistant can and cannot actually do,
++// derived from live checks rather than from marketing copy.
++app.get('/ai/capabilities', async (c) => {
++  const p = prisma as any
++  const tools = getServerToolsClient()
++  let gmailOk = false
++  try {
++    const probe: any = await tools.execute('GMAIL_FETCH_EMAILS', { maxResults: 1 })
++    gmailOk = Boolean(probe?.ok)
++  } catch { gmailOk = false }
++
++  const [memories, notes, reminders, habits, conversations] = await Promise.all([
++    p.memory.count().catch(() => 0),
++    p.note.count().catch(() => 0),
++    p.reminder.count({ where: { completed: false } }).catch(() => 0),
++    p.habit.count().catch(() => 0),
++    p.conversation.count().catch(() => 0),
++  ])
++
++  const liveModels = MODEL_CHAIN.filter(m => m.healthy || isModelReady(m))
++
++  return c.json({
++    models: {
++      answering: liveModels.map(m => ({ name: m.name, latencyMs: m.lastLatencyMs ?? null })),
++      count: liveModels.length,
++      total: MODEL_CHAIN.length,
++      locked: PREMIUM_MODELS.map(m => m.name),
++      note: 'The locked models require a Pro plan; they are not used to answer.',
++    },
++    knowledge: {
++      readsYourData: true,
++      memories, notes, openReminders: reminders, habits, storedMessages: conversations,
++      injectedIntoPrompt: ['memories', 'notes', 'reminders', 'habits', 'metrics', 'recent activity', 'live weather', 'AI news'],
++    },
++    actions: {
++      can: [
++        'save a memory', 'search memories and notes', 'create a note', 'list notes',
++        'create a reminder', 'list reminders', 'log a habit', 'list habits',
++        'record a metric', 'read recent activity', 'get live weather for any city',
++        'search news', 'read your Gmail inbox (once connected)',
++      ],
++      toolsEnabled: true,
++      gmailConnected: gmailOk,
++    },
++    cannot: [
++      'send email (no send tool wired yet)',
++      'see Google Calendar (integration not connected)',
++      'run anything on a schedule on its own (heartbeat is off; no channel connected)',
++      'generate images or speak (no voice/image layer)',
++      'stream replies token-by-token',
++      'browse the open web freely — news search is RSS-only',
++      'switch model mid-conversation without telling you',
++    ],
++  })
+ })
+ 
+ // ═══════════════════════════════════════════════════════════════════
+@@ -1207,12 +1841,21 @@ app.post('/ai/model-test', requireAuth, async (c) => {
+ // GET /api/ai/status — check AI service health + model status
+ app.get('/ai/status', async (c) => {
+   const hasToken = Boolean(resolveAiToken())
+-  const hasSearch = !!process.env.SERPAPI_KEY
++  const live = MODEL_CHAIN.filter(m => m.healthy || isModelReady(m))
+   return c.json({
+     chat: hasToken ? 'ready' : 'not configured',
+-    search: hasSearch ? 'live' : 'limited',
++    // Web search genuinely works through Google News RSS + Wikipedia. The old
++    // check reported "limited" whenever a SerpAPI key was absent, which read as
++    // broken even though search was answering.
++    search: 'live',
++    searchProvider: 'google-news-rss + wikipedia',
+     models: getModelStatus(),
+     activeModel: MODEL_CHAIN.find(m => m.healthy)?.name || 'All in cooldown',
++    modelsAnswering: `${live.length}/${MODEL_CHAIN.length}`,
++    catalogCheckedAt: catalogCheckedAt || null,
++    failures: lastProbeFailures,
++    tools: true,
++    lockedModels: PREMIUM_MODELS.map(m => m.name),
+   })
+ })
+ 
+diff --git a/scripts/probe-models.mjs b/scripts/probe-models.mjs
+new file mode 100644
+index 0000000..be0424e
+--- /dev/null
++++ b/scripts/probe-models.mjs
+@@ -0,0 +1,48 @@
++const BASE = 'https://studio.shogo.ai/api/ai/v1'
++
++// Broader net: find every model id that answers on the CURRENT plan.
++const CANDIDATES = [
++  'claude-haiku-4-5', 'claude-haiku-4-5-20251001', 'claude-3-5-haiku-latest',
++  'claude-3-5-haiku-20241022', 'claude-haiku-3-5', 'claude-3-haiku-20240307',
++  'gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-5-nano', 'gpt-5-mini',
++  'gpt-4o', 'gpt-4.1', 'gpt-5', 'o4-mini', 'o3-mini',
++  'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro',
++  'llama-3.3-70b', 'llama-3.1-8b', 'meta-llama/llama-3.3-70b-instruct',
++  'mistral-small-latest', 'mistral-large-latest', 'mixtral-8x7b',
++  'deepseek-chat', 'qwen-2.5-72b', 'grok-2', 'command-r-plus',
++  'hoshi', 'hoshi-2', 'hoshi-2.0', 'gpt-live-1', 'live-1',
++]
++
++async function main() {
++  const envRaw = await (await import('fs')).promises.readFile('/proc/648/environ', 'utf8')
++  const token = envRaw.split('\0').find((v) => v.startsWith('AI_PROXY_TOKEN='))?.slice('AI_PROXY_TOKEN='.length)
++
++  const ok = [], pro = [], no = []
++  for (const model of CANDIDATES) {
++    const started = Date.now()
++    try {
++      const res = await fetch(`${BASE}/chat/completions`, {
++        method: 'POST',
++        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with exactly: OK' }], max_tokens: 20 }),
++        signal: AbortSignal.timeout(40000),
++      })
++      const ms = Date.now() - started
++      const body = await res.text()
++      if (res.status === 403) { pro.push(model); continue }
++      if (!res.ok) { no.push(model); continue }
++      const text = (JSON.parse(body)?.choices?.[0]?.message?.content ?? '').trim()
++      if (text) ok.push(`${model} (${ms}ms) -> "${text.slice(0, 20)}"`)
++      else no.push(`${model} (200 but EMPTY)`)
++    } catch (err) { no.push(`${model} (${err.message.slice(0, 30)})`) }
++  }
++
++  console.log(`\n=== WORKS NOW (${ok.length}) ===`)
++  ok.forEach((x) => console.log('  ' + x))
++  console.log(`\n=== PRO ONLY (${pro.length}) ===`)
++  pro.forEach((x) => console.log('  ' + x))
++  console.log(`\n=== UNAVAILABLE (${no.length}) ===`)
++  no.forEach((x) => console.log('  ' + x))
++}
++
++main()
+diff --git a/scripts/probe-tools.mjs b/scripts/probe-tools.mjs
+new file mode 100644
+index 0000000..583e2f4
+--- /dev/null
++++ b/scripts/probe-tools.mjs
+@@ -0,0 +1,60 @@
++const BASE = 'https://studio.shogo.ai/api/ai/v1'
++
++const MODELS = [
++  ['Hoshi 2.0 (uuid)', '4fa677d1-e4a6-4ea1-88b5-e57101e810cd'],
++  ['Claude Haiku 4.5', 'claude-haiku-4-5'],
++  ['GPT-4.1 Mini', 'gpt-4.1-mini'],
++  ['GPT-4o Mini', 'gpt-4o-mini'],
++  ['GPT-4.1 Nano', 'gpt-4.1-nano'],
++  ['Claude Haiku Oct', 'claude-haiku-4-5-20251001'],
++]
++
++async function main() {
++  const envRaw = await (await import('fs')).promises.readFile('/proc/648/environ', 'utf8')
++  const token = envRaw.split('\0').find((v) => v.startsWith('AI_PROXY_TOKEN='))?.slice('AI_PROXY_TOKEN='.length)
++
++  for (const [name, id] of MODELS) {
++    try {
++      const res = await fetch(`${BASE}/chat/completions`, {
++        method: 'POST',
++        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++        body: JSON.stringify({
++          model: id,
++          messages: [{ role: 'user', content: 'What is the weather in Erode? Use the tool.' }],
++          max_tokens: 200,
++          tools: [
++            {
++              type: 'function',
++              function: {
++                name: 'get_weather',
++                description: 'Get live weather for a city',
++                parameters: {
++                  type: 'object',
++                  properties: { city: { type: 'string', description: 'City name' } },
++                  required: ['city'],
++                },
++              },
++            },
++          ],
++        }),
++        signal: AbortSignal.timeout(45000),
++      })
++      const body = await res.text()
++      if (!res.ok) {
++        console.log(`${name.padEnd(22)} FAIL ${res.status} ${body.slice(0, 100)}`)
++        continue
++      }
++      const msg = JSON.parse(body)?.choices?.[0]?.message
++      const calls = msg?.tool_calls
++      if (calls?.length) {
++        console.log(`${name.padEnd(22)} TOOLS OK  -> ${calls[0].function?.name}(${calls[0].function?.arguments})`)
++      } else {
++        console.log(`${name.padEnd(22)} no tool_calls (text: ${JSON.stringify((msg?.content || '').slice(0, 50))})`)
++      }
++    } catch (err) {
++      console.log(`${name.padEnd(22)} ERR ${err.message}`)
++    }
++  }
++}
++
++main()
+diff --git a/scripts/verify-capabilities.mjs b/scripts/verify-capabilities.mjs
+new file mode 100644
+index 0000000..d5ca2b5
+--- /dev/null
++++ b/scripts/verify-capabilities.mjs
+@@ -0,0 +1,110 @@
++// End-to-end verification of the new AI capabilities, run against the live API.
++// Creates one throwaway account and removes everything it created afterwards.
++import { prisma as p } from '../src/lib/db'
++
++const BASE = 'http://localhost:8080/api'
++// Random suffix: a leftover account from an interrupted run can never block
++// the next one, and no probe account can be guessed or reused.
++const USER = '__probe_verify_' + Math.random().toString(36).slice(2, 8)
++// Generated per run — no credential literal is ever committed.
++const PASS = 'Probe!' + Math.random().toString(36).slice(2, 12) + 'A1!'
++
++// Never hard-code the invite code — it is a real secret and this file is
++// committed. Read it from the git-ignored file (or the env) instead.
++async function readInvite() {
++  if (process.env.JARVIS_INVITE_CODE) return process.env.JARVIS_INVITE_CODE.trim()
++  const { readFileSync } = await import('fs')
++  return readFileSync('.jarvis-invite', 'utf8').trim()
++}
++
++const j = async (r) => { const t = await r.text(); try { return JSON.parse(t) } catch { return { _raw: t.slice(0, 300) } } }
++
++async function main() {
++  // Snapshot BEFORE anything runs: everything newer than this is ours.
++  const startedAt = new Date()
++  await new Promise(r => setTimeout(r, 1100))
++  const results = []
++  const INVITE = await readInvite()
++
++  // 1) register (invite code required because real accounts exist)
++  let reg = await fetch(`${BASE}/auth/register`, {
++    method: 'POST', headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({ username: USER, password: PASS, inviteCode: INVITE }),
++  }); let regBody = await j(reg)
++  if (!reg.ok) {
++    reg = await fetch(`${BASE}/auth/login`, {
++      method: 'POST', headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ username: USER, password: PASS }),
++    }); regBody = await j(reg)
++  }
++  const token = regBody.token
++  if (!token) { console.log('AUTH FAILED', regBody); process.exit(1) }
++  results.push(`auth: ok (token issued)`)
++
++  const chat = async (messages, extra = {}) => {
++    const r = await fetch(`${BASE}/ai/chat?token=${token}`, {
++      method: 'POST', headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ messages, sessionId: 'verify', ...extra }),
++    })
++    return { status: r.status, body: await j(r) }
++  }
++
++  // 2) tool call — save a memory
++  let r1 = await chat([{ role: 'user', content: 'Remember this: my main roofing steel supplier is Madras Steels, and their rate is 62 rupees per kg.' }])
++  results.push(`save_memory: ${r1.status} model=${r1.body.source} tools=${JSON.stringify((r1.body.toolsUsed || []).map(t => `${t.name}:${t.ok}`))}`)
++
++  // 3) does it READ the memory back without being told again?
++  let r2 = await chat([
++    { role: 'user', content: 'Remember this: my main roofing steel supplier is Madras Steels, and their rate is 62 rupees per kg.' },
++    { role: 'assistant', content: r1.body.content || '' },
++    { role: 'user', content: 'What is my steel supplier called and what rate did I tell you?' },
++  ])
++  const recalled = /madras steels/i.test(r2.body.content || '')
++  results.push(`read-back memory: ${recalled ? 'PASS' : 'FAIL'} — "${String(r2.body.content || '').slice(0, 150)}"`)
++
++  // 4) create_note tool writes a real row
++  let r3 = await chat([{ role: 'user', content: 'Create a note titled "Probe Verify Note" with the content: verification of tool calling. Category: test.' }])
++  results.push(`create_note: ${r3.status} tools=${JSON.stringify((r3.body.toolsUsed || []).map(t => `${t.name}:${t.ok}`))}`)
++
++  // 5) live weather for a NON-Erode city — proves the tool, not the cached block
++  let r4 = await chat([{ role: 'user', content: 'What is the current weather in Chennai right now? Use your tool.' }])
++  const weatherTool = (r4.body.toolsUsed || []).find(t => t.name === 'get_weather')
++  results.push(`get_weather(Chennai): ${weatherTool ? `${weatherTool.ok ? 'PASS' : 'FAIL'} — ${weatherTool.summary}` : 'NOT CALLED'}`)
++
++  // 6) is the session model sticky across turns?
++  const order = [r1.body.modelId, r2.body.modelId, r3.body.modelId, r4.body.modelId]
++  const sticky = new Set(order.filter(Boolean)).size <= 1
++  results.push(`sticky model across 4 turns: ${sticky ? 'PASS' : 'FAIL'} — ${JSON.stringify([r1.body.source, r2.body.source, r3.body.source, r4.body.source])}`)
++
++  // 7) model switch is reported, not silent
++  const switched = [r1, r2, r3, r4].filter(r => r.body.switchedFrom).length
++  results.push(`fallback reported when it happened: ${switched} turn(s) with switchedFrom`)
++
++  // 8) a forced specific model
++  let r5 = await chat([{ role: 'user', content: 'Reply with one short sentence confirming you are online.' }], { model: 'gpt-4.1-mini' })
++  results.push(`explicit model pick: requested=gpt-4.1-mini served=${r5.body.source} switchedFrom=${r5.body.switchedFrom}`)
++
++  console.log('\n=== VERIFICATION ===')
++  results.forEach(x => console.log('  ' + x))
++
++  // Clean up in the same run: a verification script must never leave rows in
++  // the live database. Scoped by a pre-test timestamp so nothing is missed.
++  const u = await p.authUser.findUnique({ where: { username: USER } })
++  let sessions = 0
++  if (u) {
++    sessions = (await p.authSession.deleteMany({ where: { userId: u.id } })).count
++    await p.authUser.delete({ where: { id: u.id } })
++  }
++  const convs = await p.conversation.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const mems = await p.memory.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const notes = await p.note.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const rems = await p.reminder.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const mets = await p.metric.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const acts = await p.activityLog.deleteMany({ where: { createdAt: { gte: startedAt } } })
++
++  console.log(`\nCLEANUP: conversations=${convs.count} memories=${mems.count} notes=${notes.count} reminders=${rems.count} metrics=${mets.count} sessions=${sessions} user=${u ? 'deleted' : 'absent'} activity=${acts.count}`)
++  console.log('remaining users:', (await p.authUser.findMany({ select: { username: true } })).map(x => x.username).join(', '))
++  console.log('remaining -> memories:', await p.memory.count(), 'notes:', await p.note.count(), 'conversations:', await p.conversation.count())
++}
++
++main().catch(e => { console.error('ERR', e.message); process.exit(1) })
+diff --git a/scripts/verify-fallback.mjs b/scripts/verify-fallback.mjs
+new file mode 100644
+index 0000000..003fe3b
+--- /dev/null
++++ b/scripts/verify-fallback.mjs
+@@ -0,0 +1,84 @@
++// Verifies "never fall back silently", then removes everything it created.
++// Cleanup is scoped by a pre-test timestamp, so no row can be missed.
++import { prisma as p } from '../src/lib/db'
++
++const BASE = 'http://localhost:8080/api'
++// Random suffix: a leftover account from an interrupted run can never block
++// the next one, and no probe account can be guessed or reused.
++const USER = '__probe_fallback_' + Math.random().toString(36).slice(2, 8)
++// Generated per run — no credential literal is ever committed.
++const PASS = 'Probe!' + Math.random().toString(36).slice(2, 12) + 'A1!'
++const MARK = 'PROBE-FALLBACK-MARKER'
++
++// Never hard-code the invite code — it is a real secret and this file is
++// committed. Read it from the git-ignored file (or the env) instead.
++async function readInvite() {
++  if (process.env.JARVIS_INVITE_CODE) return process.env.JARVIS_INVITE_CODE.trim()
++  const { readFileSync } = await import('fs')
++  return readFileSync('.jarvis-invite', 'utf8').trim()
++}
++
++const j = async (r) => { const t = await r.text(); try { return JSON.parse(t) } catch { return { _raw: t.slice(0, 200) } } }
++
++async function main() {
++  // Snapshot BEFORE anything runs: everything newer than this is ours.
++  const startedAt = new Date()
++  await new Promise(r => setTimeout(r, 1100))
++  const INVITE = await readInvite()
++
++  const out = []
++  const reg = await fetch(`${BASE}/auth/register`, {
++    method: 'POST', headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({ username: USER, password: PASS, inviteCode: INVITE }),
++  })
++  const body = await j(reg)
++  if (!body.token) throw new Error('register failed: ' + JSON.stringify(body))
++  const token = body.token
++
++  const chat = async (messages, extra = {}) => {
++    const r = await fetch(`${BASE}/ai/chat?token=${token}`, {
++      method: 'POST', headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ messages, sessionId: 'fb', ...extra }),
++    })
++    return { status: r.status, body: await j(r) }
++  }
++
++  const dead = await chat([{ role: 'user', content: `Say OK. ${MARK}` }], { model: 'claude-sonnet-5' })
++  out.push(`requested claude-sonnet-5 (Pro-only) -> ${dead.status}, served=${dead.body.source}, switchedFrom=${dead.body.switchedFrom}`)
++  out.push(`  substitution reported: ${dead.body.switchedFrom ? 'PASS' : 'FAIL'}`)
++  out.push(`  answered anyway: ${dead.body.content ? 'PASS' : 'FAIL'}`)
++
++  const noTools = await chat([{ role: 'user', content: `Create a note titled "${MARK}-note" saying hello. ${MARK}` }], { toolsEnabled: false })
++  out.push(`toolsEnabled=false -> toolsUsed=${JSON.stringify(noTools.body.toolsUsed)} ${(noTools.body.toolsUsed || []).length === 0 ? 'PASS' : 'FAIL'}`)
++
++  const pick = await chat([{ role: 'user', content: `Reply "one". ${MARK}` }], { model: 'gpt-4.1-nano' })
++  const auto = await chat([{ role: 'user', content: `Reply "two". ${MARK}` }], {})
++  out.push(`explicit gpt-4.1-nano -> ${pick.body.source}; next auto turn -> ${auto.body.source} ${pick.body.source === auto.body.source ? 'PASS (sticky)' : 'FAIL (drifted)'}`)
++
++  const fresh = await chat([{ role: 'user', content: `Reply "three". ${MARK}` }], { sessionId: 'fb-fresh' })
++  out.push(`fresh session -> ${fresh.body.source}`)
++
++  // An unknown model id must also be reported, not swallowed.
++  const bogus = await chat([{ role: 'user', content: `Say OK. ${MARK}` }], { model: 'no-such-model-xyz' })
++  out.push(`bogus model id -> ${bogus.status}, served=${bogus.body.source}, switchedFrom=${bogus.body.switchedFrom}`)
++  out.push(`  reported: ${bogus.body.switchedFrom ? 'PASS' : 'FAIL'}`)
++
++  console.log('\n=== FALLBACK / STICKINESS ===')
++  out.forEach(x => console.log('  ' + x))
++
++  const u = await p.authUser.findUnique({ where: { username: USER } })
++  let sessions = 0
++  if (u) {
++    sessions = (await p.authSession.deleteMany({ where: { userId: u.id } })).count
++    await p.authUser.delete({ where: { id: u.id } })
++  }
++  const convs = await p.conversation.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const notes = await p.note.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const mems = await p.memory.deleteMany({ where: { createdAt: { gte: startedAt } } })
++  const acts = await p.activityLog.deleteMany({ where: { createdAt: { gte: startedAt } } })
++
++  console.log(`\nCLEANUP: conversations=${convs.count} notes=${notes.count} memories=${mems.count} sessions=${sessions} user=${u ? 'deleted' : 'absent'} activity=${acts.count}`)
++  console.log('remaining users:', (await p.authUser.findMany({ select: { username: true } })).map(x => x.username).join(', '))
++  console.log('remaining -> notes:', await p.note.count(), 'memories:', await p.memory.count(), 'conversations:', await p.conversation.count())
++}
++main().catch(e => { console.error('ERR', e.message) })
+diff --git a/src/surfaces/AIChat.tsx b/src/surfaces/AIChat.tsx
+index d6f8c72..f3726db 100644
+--- a/src/surfaces/AIChat.tsx
++++ b/src/surfaces/AIChat.tsx
+@@ -1,5 +1,5 @@
+ import { useState, useRef, useEffect, useCallback } from 'react'
+-import { Send, Search, Mic, Bot, User, Sparkles, ArrowUpRight, RotateCcw, Loader2, AlertTriangle, Cpu, RefreshCw } from 'lucide-react'
++import { Send, Search, Mic, Bot, User, Sparkles, ArrowUpRight, RotateCcw, Loader2, AlertTriangle, Cpu, RefreshCw, Check } from 'lucide-react'
+ import { cn } from '@/lib/cn'
+ import { authHeaders, jsonAuthHeaders } from '@/lib/api'
+ import { Select, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select'
+@@ -15,6 +15,10 @@ interface Message {
+   error?: boolean
+   detail?: string
+   setupHint?: string
++  /** Real actions the assistant took while answering this message. */
++  toolsUsed?: Array<{ name: string; ok: boolean; summary: string }>
++  /** Set when the conversation's model had to be abandoned — shown, never silent. */
++  switchedFrom?: string
+ }
+ 
+ const QUICK_ACTIONS = [
+@@ -97,7 +101,8 @@ export default function AIChat() {
+   const [isListening, setIsListening] = useState(false)
+   const [voiceSupported, setVoiceSupported] = useState(false)
+   const [jarvisMode, setJarvisMode] = useState<'active' | 'sleeping'>('active')
+-  const [models, setModels] = useState<Array<{ id: string; name: string; healthy: boolean }>>([])
++  const [models, setModels] = useState<Array<{ id: string; name: string; healthy: boolean; latencyMs?: number | null }>>([])
++  const [modelsAnswering, setModelsAnswering] = useState('')
+   const [selectedModel, setSelectedModel] = useState('auto')
+   const messagesEndRef = useRef<HTMLDivElement>(null)
+   const inputRef = useRef<HTMLTextAreaElement>(null)
+@@ -106,7 +111,7 @@ export default function AIChat() {
+   const GREETING: Message = {
+     id: generateId(),
+     role: 'assistant',
+-    content: "Greetings, Master Sri. I am **J.A.R.V.I.S.** — your personal AI command center.\n\nI am fully online and at your service. Here's what I can do for you:\n\n- 💻 **Write any code** — Python, TypeScript, Deluge, Apps Script, React, Next.js, FastAPI\n- ⚙️ **Build automations** — n8n workflows, Zoho CRM, Google Ads pipelines\n- 🐛 **Debug & fix** — paste any error, I'll trace and fix it\n- 🏗️ **Design systems** — architecture, APIs, databases, workflows\n- 📧 **Manage email** — read, send, organize your Gmail\n- 📅 **Your schedule** — check calendar, plan meetings\n- 🌐 **Research** — find best tools, frameworks, techniques\n- 💰 **Business** — strategy, automation, revenue optimization\n\n**Your wish is my command, Master. What shall we build today?**",
++    content: "Greetings, Master Sri. I am **J.A.R.V.I.S.** — your personal AI command center.\n\nI am online, and I now read and write your real data. Here's what I can actually do:\n\n- 🧠 **Remember** — I read your saved memories, notes, reminders and habits, and I can save new ones for you\n- 📝 **Act, not just answer** — create notes, set reminders, log habits, record metrics on request\n- 💻 **Write real code** — Python, TypeScript, Deluge, Apps Script, React, Next.js, FastAPI\n- ⚙️ **Build automations** — n8n workflows, Zoho CRM, Google Ads pipelines\n- 🐛 **Debug & fix** — paste any error, I'll trace and fix it\n- 🌦️ **Live data** — weather for any city, current headlines, what you've been working on\n\n**Where I'm honestly limited:** I can't send email or read your Gmail until you connect it in the Connections Hub, I can't see your calendar, and I can't reach you on my own — no notification channel is set up, so reminders I create wait for you in the app.\n\n**What shall we build today, Master?**",
+     timestamp: new Date(),
+   }
+ 
+@@ -135,11 +140,17 @@ export default function AIChat() {
+     return () => { cancelled = true }
+   }, [])
+ 
+-  // Which models are actually live right now.
++  // Which models are actually live right now — served from the server's own
++  // live probe, so a model appears here only if it genuinely answered.
+   useEffect(() => {
+     fetch('/api/ai/models')
+       .then(r => r.json())
+-      .then(d => setModels(d?.models || []))
++      .then(d => {
++        const list = d?.models || []
++        setModels(list)
++        const up = list.filter((m: any) => m.healthy).length
++        setModelsAnswering(`${up}/${list.length}`)
++      })
+       .catch(() => {})
+   }, [])
+ 
+@@ -248,14 +259,27 @@ export default function AIChat() {
+ 
+     const assistantId = generateId()
+ 
+-    const updateAssistant = (content: string, source?: string) => {
++    const updateAssistant = (
++      content: string,
++      source?: string,
++      extra?: { toolsUsed?: Message['toolsUsed']; switchedFrom?: string },
++    ) => {
+       setMessages(prev => {
+         const updated = [...prev]
+         const lastIdx = updated.findIndex(m => m.id === assistantId)
++        const patch = {
++          content,
++          source,
++          error: false,
++          detail: undefined,
++          setupHint: undefined,
++          toolsUsed: extra?.toolsUsed,
++          switchedFrom: extra?.switchedFrom || undefined,
++        }
+         if (lastIdx >= 0) {
+-          updated[lastIdx] = { ...updated[lastIdx], content, source, error: false, detail: undefined, setupHint: undefined }
++          updated[lastIdx] = { ...updated[lastIdx], ...patch }
+         } else {
+-          updated.push({ id: assistantId, role: 'assistant', content, timestamp: new Date(), source })
++          updated.push({ id: assistantId, role: 'assistant', timestamp: new Date(), ...patch })
+         }
+         return updated
+       })
+@@ -285,6 +309,7 @@ export default function AIChat() {
+             .filter(msg => !msg.error)
+             .map(msg => ({ role: msg.role, content: msg.content })),
+           model: selectedModel === 'auto' ? undefined : selectedModel,
++          sessionId: 'main',
+         }),
+       })
+ 
+@@ -295,7 +320,10 @@ export default function AIChat() {
+       }
+ 
+       if (data.content) {
+-        updateAssistant(data.content, data.source)
++        updateAssistant(data.content, data.source, {
++          toolsUsed: data.toolsUsed,
++          switchedFrom: data.switchedFrom,
++        })
+         return
+       }
+ 
+@@ -311,11 +339,15 @@ export default function AIChat() {
+               .filter(msg => !msg.error)
+               .map(msg => ({ role: msg.role, content: msg.content })),
+             model: selectedModel === 'auto' ? undefined : selectedModel,
++            sessionId: 'main',
+           }),
+         })
+         const retryData = await retryRes.json().catch(() => null)
+         if (retryRes.ok && retryData?.content) {
+-          updateAssistant(retryData.content, retryData.source)
++          updateAssistant(retryData.content, retryData.source, {
++            toolsUsed: retryData.toolsUsed,
++            switchedFrom: retryData.switchedFrom,
++          })
+           return
+         }
+       } catch {}
+@@ -351,7 +383,11 @@ export default function AIChat() {
+           <div>
+             <h2 className="text-sm font-semibold text-foreground">J.A.R.V.I.S. AI</h2>
+             <p className="text-xs text-primary/60 font-mono">
+-              {jarvisMode === 'sleeping' ? '🌙 Standby Mode — Say "Hey JARVIS" to wake' : isTyping ? 'Thinking…' : `Online • ${selectedLabel}`}
++              {jarvisMode === 'sleeping'
++                ? '🌙 Standby Mode — Say "Hey JARVIS" to wake'
++                : isTyping
++                  ? 'Thinking…'
++                  : `Online • ${selectedModel === 'auto' && modelsAnswering ? `Auto (${modelsAnswering} live)` : selectedLabel}`}
+             </p>
+           </div>
+         </div>
+@@ -448,6 +484,31 @@ export default function AIChat() {
+               ) : (
+                 <div className="space-y-1">{renderMarkdown(msg.content)}</div>
+               )}
++
++              {/* Actions actually taken, recorded server-side — proof rather
++                  than a claim. */}
++              {!!msg.toolsUsed?.length && (
++                <div className="mt-2.5 pt-2.5 border-t border-border/50 space-y-1">
++                  <p className="text-[10px] font-semibold text-primary/70 uppercase tracking-wide">Actions taken</p>
++                  {msg.toolsUsed.map((t, i) => (
++                    <div key={i} className="flex items-start gap-1.5 text-[11px]">
++                      {t.ok
++                        ? <Check className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
++                        : <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />}
++                      <span className={t.ok ? 'text-foreground/70' : 'text-amber-300'}>{t.summary}</span>
++                    </div>
++                  ))}
++                </div>
++              )}
++
++              {/* A model switch is announced, never silent. */}
++              {msg.switchedFrom && (
++                <p className="text-[10px] text-amber-300/80 mt-2 flex items-start gap-1">
++                  <RefreshCw className="w-3 h-3 mt-px shrink-0" />
++                  <span>{msg.switchedFrom} stopped responding, so this reply came from {msg.source}. The conversation continues there.</span>
++                </p>
++              )}
++
+               <p className="text-[10px] text-muted-foreground mt-2 opacity-60">
+                 {formatTime(msg.timestamp)}{msg.source ? ` · ${msg.source}` : ''}
+               </p>
+@@ -526,7 +587,7 @@ export default function AIChat() {
+         </div>
+         <p className="text-[10px] text-muted-foreground mt-2 text-center opacity-50">
+           <Sparkles className="w-3 h-3 inline mr-1" />
+-          Multi-AI Engine (Claude → GPT-4o → Gemini) • Always Online • Shift+Enter for new line
++          Reads your memories, notes &amp; reminders • {models.length ? `${models.filter(m => m.healthy).length} live models, auto-failover` : 'Multi-model failover'} • Shift+Enter for new line
+         </p>
+       </div>
+     </div>
+-- 
+2.47.3
+

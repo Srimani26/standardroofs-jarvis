@@ -22,3 +22,68 @@ export * from './enums';
  * 
  */
 export type User = Prisma.UserModel
+/**
+ * Model AuthUser
+ * 
+ */
+export type AuthUser = Prisma.AuthUserModel
+/**
+ * Model AuthSession
+ * 
+ */
+export type AuthSession = Prisma.AuthSessionModel
+/**
+ * Model Habit
+ * 
+ */
+export type Habit = Prisma.HabitModel
+/**
+ * Model HabitCompletion
+ * 
+ */
+export type HabitCompletion = Prisma.HabitCompletionModel
+/**
+ * Model Note
+ * 
+ */
+export type Note = Prisma.NoteModel
+/**
+ * Model Metric
+ * 
+ */
+export type Metric = Prisma.MetricModel
+/**
+ * Model Reminder
+ * 
+ */
+export type Reminder = Prisma.ReminderModel
+/**
+ * Model Memory
+ * 
+ */
+export type Memory = Prisma.MemoryModel
+/**
+ * Model Conversation
+ * 
+ */
+export type Conversation = Prisma.ConversationModel
+/**
+ * Model ActivityLog
+ * 
+ */
+export type ActivityLog = Prisma.ActivityLogModel
+/**
+ * Model DailySummary
+ * 
+ */
+export type DailySummary = Prisma.DailySummaryModel
+/**
+ * Model UserSession
+ * 
+ */
+export type UserSession = Prisma.UserSessionModel
+/**
+ * Model SystemEvent
+ * 
+ */
+export type SystemEvent = Prisma.SystemEventModel

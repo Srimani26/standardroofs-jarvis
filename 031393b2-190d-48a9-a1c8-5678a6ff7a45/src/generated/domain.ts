@@ -14,12 +14,116 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  getAuthUserList,
+  getAuthUserById,
+  createAuthUser,
+  updateAuthUser,
+  deleteAuthUser,
+  getAuthSessionList,
+  getAuthSessionById,
+  createAuthSession,
+  updateAuthSession,
+  deleteAuthSession,
+  getHabitList,
+  getHabitById,
+  createHabit,
+  updateHabit,
+  deleteHabit,
+  getHabitCompletionList,
+  getHabitCompletionById,
+  createHabitCompletion,
+  updateHabitCompletion,
+  deleteHabitCompletion,
+  getNoteList,
+  getNoteById,
+  createNote,
+  updateNote,
+  deleteNote,
+  getMetricList,
+  getMetricById,
+  createMetric,
+  updateMetric,
+  deleteMetric,
+  getReminderList,
+  getReminderById,
+  createReminder,
+  updateReminder,
+  deleteReminder,
+  getMemoryList,
+  getMemoryById,
+  createMemory,
+  updateMemory,
+  deleteMemory,
+  getConversationList,
+  getConversationById,
+  createConversation,
+  updateConversation,
+  deleteConversation,
+  getActivityLogList,
+  getActivityLogById,
+  createActivityLog,
+  updateActivityLog,
+  deleteActivityLog,
+  getDailySummaryList,
+  getDailySummaryById,
+  createDailySummary,
+  updateDailySummary,
+  deleteDailySummary,
+  getUserSessionList,
+  getUserSessionById,
+  createUserSession,
+  updateUserSession,
+  deleteUserSession,
+  getSystemEventList,
+  getSystemEventById,
+  createSystemEvent,
+  updateSystemEvent,
+  deleteSystemEvent,
 } from './server-functions'
 
 import type {
   UserType,
   UserCreateInput,
   UserUpdateInput,
+  AuthUserType,
+  AuthUserCreateInput,
+  AuthUserUpdateInput,
+  AuthSessionType,
+  AuthSessionCreateInput,
+  AuthSessionUpdateInput,
+  HabitType,
+  HabitCreateInput,
+  HabitUpdateInput,
+  HabitCompletionType,
+  HabitCompletionCreateInput,
+  HabitCompletionUpdateInput,
+  NoteType,
+  NoteCreateInput,
+  NoteUpdateInput,
+  MetricType,
+  MetricCreateInput,
+  MetricUpdateInput,
+  ReminderType,
+  ReminderCreateInput,
+  ReminderUpdateInput,
+  MemoryType,
+  MemoryCreateInput,
+  MemoryUpdateInput,
+  ConversationType,
+  ConversationCreateInput,
+  ConversationUpdateInput,
+  ActivityLogType,
+  ActivityLogCreateInput,
+  ActivityLogUpdateInput,
+  DailySummaryType,
+  DailySummaryCreateInput,
+  DailySummaryUpdateInput,
+  UserSessionType,
+  UserSessionCreateInput,
+  UserSessionUpdateInput,
+  SystemEventType,
+  SystemEventCreateInput,
+  SystemEventUpdateInput,
 } from './types'
 
 // ============================================================================
@@ -231,20 +335,2763 @@ export class UserStore {
 }
 
 // ============================================================================
+// AuthUser Store
+// ============================================================================
+
+export class AuthUserStore {
+  items: Map<string, AuthUserType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): AuthUserType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): AuthUserType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getAuthUserList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getAuthUserById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: AuthUserCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: AuthUserType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as AuthUserType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createAuthUser({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: AuthUserUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[AuthUserStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as AuthUserType)
+    })
+
+    try {
+      const item = await updateAuthUser({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[AuthUserStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteAuthUser({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// AuthSession Store
+// ============================================================================
+
+export class AuthSessionStore {
+  items: Map<string, AuthSessionType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): AuthSessionType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): AuthSessionType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getAuthSessionList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getAuthSessionById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: AuthSessionCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: AuthSessionType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as AuthSessionType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createAuthSession({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: AuthSessionUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[AuthSessionStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as AuthSessionType)
+    })
+
+    try {
+      const item = await updateAuthSession({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[AuthSessionStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteAuthSession({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// Habit Store
+// ============================================================================
+
+export class HabitStore {
+  items: Map<string, HabitType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): HabitType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): HabitType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getHabitList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getHabitById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: HabitCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: HabitType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as HabitType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createHabit({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: HabitUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[HabitStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as HabitType)
+    })
+
+    try {
+      const item = await updateHabit({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[HabitStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteHabit({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// HabitCompletion Store
+// ============================================================================
+
+export class HabitCompletionStore {
+  items: Map<string, HabitCompletionType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): HabitCompletionType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): HabitCompletionType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getHabitCompletionList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getHabitCompletionById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: HabitCompletionCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: HabitCompletionType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as HabitCompletionType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createHabitCompletion({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: HabitCompletionUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[HabitCompletionStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as HabitCompletionType)
+    })
+
+    try {
+      const item = await updateHabitCompletion({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[HabitCompletionStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteHabitCompletion({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// Note Store
+// ============================================================================
+
+export class NoteStore {
+  items: Map<string, NoteType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): NoteType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): NoteType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getNoteList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getNoteById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: NoteCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: NoteType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as NoteType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createNote({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: NoteUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[NoteStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as NoteType)
+    })
+
+    try {
+      const item = await updateNote({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[NoteStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteNote({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// Metric Store
+// ============================================================================
+
+export class MetricStore {
+  items: Map<string, MetricType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): MetricType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): MetricType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getMetricList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getMetricById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: MetricCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: MetricType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as MetricType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createMetric({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: MetricUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[MetricStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as MetricType)
+    })
+
+    try {
+      const item = await updateMetric({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[MetricStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteMetric({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// Reminder Store
+// ============================================================================
+
+export class ReminderStore {
+  items: Map<string, ReminderType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): ReminderType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): ReminderType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getReminderList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getReminderById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: ReminderCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: ReminderType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as ReminderType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createReminder({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: ReminderUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[ReminderStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as ReminderType)
+    })
+
+    try {
+      const item = await updateReminder({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[ReminderStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteReminder({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// Memory Store
+// ============================================================================
+
+export class MemoryStore {
+  items: Map<string, MemoryType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): MemoryType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): MemoryType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getMemoryList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getMemoryById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: MemoryCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: MemoryType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as MemoryType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createMemory({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: MemoryUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[MemoryStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as MemoryType)
+    })
+
+    try {
+      const item = await updateMemory({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[MemoryStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteMemory({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// Conversation Store
+// ============================================================================
+
+export class ConversationStore {
+  items: Map<string, ConversationType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): ConversationType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): ConversationType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getConversationList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getConversationById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: ConversationCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: ConversationType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as ConversationType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createConversation({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: ConversationUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[ConversationStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as ConversationType)
+    })
+
+    try {
+      const item = await updateConversation({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[ConversationStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteConversation({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// ActivityLog Store
+// ============================================================================
+
+export class ActivityLogStore {
+  items: Map<string, ActivityLogType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): ActivityLogType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): ActivityLogType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getActivityLogList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getActivityLogById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: ActivityLogCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: ActivityLogType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as ActivityLogType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createActivityLog({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: ActivityLogUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[ActivityLogStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as ActivityLogType)
+    })
+
+    try {
+      const item = await updateActivityLog({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[ActivityLogStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteActivityLog({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// DailySummary Store
+// ============================================================================
+
+export class DailySummaryStore {
+  items: Map<string, DailySummaryType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): DailySummaryType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): DailySummaryType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getDailySummaryList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getDailySummaryById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: DailySummaryCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: DailySummaryType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as DailySummaryType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createDailySummary({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: DailySummaryUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[DailySummaryStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as DailySummaryType)
+    })
+
+    try {
+      const item = await updateDailySummary({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[DailySummaryStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteDailySummary({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// UserSession Store
+// ============================================================================
+
+export class UserSessionStore {
+  items: Map<string, UserSessionType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): UserSessionType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): UserSessionType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getUserSessionList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getUserSessionById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: UserSessionCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: UserSessionType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as UserSessionType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createUserSession({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: UserSessionUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[UserSessionStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as UserSessionType)
+    })
+
+    try {
+      const item = await updateUserSession({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[UserSessionStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteUserSession({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
+// SystemEvent Store
+// ============================================================================
+
+export class SystemEventStore {
+  items: Map<string, SystemEventType> = new Map()
+  isLoading = false
+  error: string | null = null
+
+  // Track pending operations for optimistic updates
+  private pendingDeletes = new Set<string>()
+  private pendingUpdates = new Set<string>()
+
+  constructor() {
+    makeAutoObservable(this, {
+      pendingDeletes: false,
+      pendingUpdates: false,
+    })
+  }
+
+  // === Getters ===
+
+  /** Get all items as array */
+  get all(): SystemEventType[] {
+    return Array.from(this.items.values())
+  }
+
+  /** Get item by ID */
+  get(id: string): SystemEventType | undefined {
+    return this.items.get(id)
+  }
+
+  /** Check if item has pending operation */
+  isPending(id: string): boolean {
+    return this.pendingDeletes.has(id) || this.pendingUpdates.has(id)
+  }
+
+  // === Actions ===
+
+  /** Load all items from server */
+  async loadAll(userId?: string, where?: Record<string, unknown>) {
+    runInAction(() => {
+      this.isLoading = true
+      this.error = null
+    })
+
+    try {
+      const items = await getSystemEventList({ data: { userId, where } })
+
+      runInAction(() => {
+        this.items.clear()
+        for (const item of items) {
+          this.items.set(item.id, item)
+        }
+        this.isLoading = false
+      })
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+        this.isLoading = false
+      })
+      throw e
+    }
+  }
+
+  /** Load single item by ID */
+  async loadById(id: string, userId?: string) {
+    try {
+      const item = await getSystemEventById({ data: { id, userId } })
+
+      runInAction(() => {
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        this.error = e instanceof Error ? e.message : 'Failed to load'
+      })
+      throw e
+    }
+  }
+
+  /** Create new item with optimistic update */
+  async create(input: SystemEventCreateInput, userId?: string) {
+    // Create optimistic item
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimisticItem: SystemEventType = {
+      id: tempId,
+      ...input,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as SystemEventType
+
+    // Add optimistically
+    runInAction(() => {
+      this.items.set(tempId, optimisticItem)
+    })
+
+    try {
+      const item = await createSystemEvent({ data: { input, userId } })
+
+      runInAction(() => {
+        // Remove temp, add real
+        this.items.delete(tempId)
+        this.items.set(item.id, item)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.delete(tempId)
+        this.error = e instanceof Error ? e.message : 'Failed to create'
+      })
+      throw e
+    }
+  }
+
+  /** Update item with optimistic update */
+  async update(id: string, input: SystemEventUpdateInput, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[SystemEventStore] update called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingUpdates.has(id)) return
+
+    const previousState = { ...existing }
+    this.pendingUpdates.add(id)
+
+    // Optimistically update
+    runInAction(() => {
+      this.items.set(id, {
+        ...existing,
+        ...input,
+        updatedAt: new Date(),
+      } as SystemEventType)
+    })
+
+    try {
+      const item = await updateSystemEvent({ data: { id, input, userId } })
+
+      runInAction(() => {
+        this.items.set(id, item)
+        this.pendingUpdates.delete(id)
+      })
+
+      return item
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, previousState)
+        this.pendingUpdates.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to update'
+      })
+      throw e
+    }
+  }
+
+  /** Delete item with optimistic update */
+  async delete(id: string, userId?: string) {
+    // Validate id to prevent undefined from reaching the API
+    if (!id || typeof id !== 'string') {
+      console.error('[SystemEventStore] delete called with invalid id:', id)
+      return
+    }
+    const existing = this.items.get(id)
+    if (!existing || this.pendingDeletes.has(id)) return
+
+    this.pendingDeletes.add(id)
+
+    // Optimistically remove
+    runInAction(() => {
+      this.items.delete(id)
+    })
+
+    try {
+      await deleteSystemEvent({ data: { id, userId } })
+
+      runInAction(() => {
+        this.pendingDeletes.delete(id)
+      })
+    } catch (e) {
+      runInAction(() => {
+        // Rollback
+        this.items.set(id, existing)
+        this.pendingDeletes.delete(id)
+        this.error = e instanceof Error ? e.message : 'Failed to delete'
+      })
+      throw e
+    }
+  }
+
+  /** Clear error state */
+  clearError() {
+    this.error = null
+  }
+
+  /** Clear all data */
+  clear() {
+    this.items.clear()
+    this.error = null
+    this.isLoading = false
+  }
+}
+
+// ============================================================================
 // Root Store
 // ============================================================================
 
 export class RootStore {
   user: UserStore
+  authUser: AuthUserStore
+  authSession: AuthSessionStore
+  habit: HabitStore
+  habitCompletion: HabitCompletionStore
+  note: NoteStore
+  metric: MetricStore
+  reminder: ReminderStore
+  memory: MemoryStore
+  conversation: ConversationStore
+  activityLog: ActivityLogStore
+  dailySummary: DailySummaryStore
+  userSession: UserSessionStore
+  systemEvent: SystemEventStore
 
   constructor() {
     this.user = new UserStore()
+    this.authUser = new AuthUserStore()
+    this.authSession = new AuthSessionStore()
+    this.habit = new HabitStore()
+    this.habitCompletion = new HabitCompletionStore()
+    this.note = new NoteStore()
+    this.metric = new MetricStore()
+    this.reminder = new ReminderStore()
+    this.memory = new MemoryStore()
+    this.conversation = new ConversationStore()
+    this.activityLog = new ActivityLogStore()
+    this.dailySummary = new DailySummaryStore()
+    this.userSession = new UserSessionStore()
+    this.systemEvent = new SystemEventStore()
     makeAutoObservable(this)
   }
 
   /** Clear all stores */
   clearAll() {
     this.user.clear()
+    this.authUser.clear()
+    this.authSession.clear()
+    this.habit.clear()
+    this.habitCompletion.clear()
+    this.note.clear()
+    this.metric.clear()
+    this.reminder.clear()
+    this.memory.clear()
+    this.conversation.clear()
+    this.activityLog.clear()
+    this.dailySummary.clear()
+    this.userSession.clear()
+    this.systemEvent.clear()
   }
 }
 
