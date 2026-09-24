@@ -9,4 +9,9 @@ memory/
 .jarvis-invite
 .jarvis-keys.json
 .jarvis-secret
-feb4eed3-1438-47bd-9af9-3724da926327/
+
+# Workspace / pod-level files — must never be committed into an app repo.
+# Committing these binds a new pod to the wrong pool and confuses the agent.
+WORKSPACE.md
+.shogo-pool-assignment
+.shogo-runtime-version

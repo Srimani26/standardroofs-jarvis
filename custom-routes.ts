@@ -175,6 +175,36 @@ async function requireAuth(c: any, next: any) {
   }
 }
 
+// Session tokens MUST be unique. jwt.sign() of the same payload inside the
+// same wall-clock second produces a byte-identical string, and
+// auth_sessions.token is UNIQUE — that collision used to 500 every login that
+// happened within a second of a register or another login. A random `jti`
+// guarantees uniqueness without changing the token's meaning.
+function newSessionToken(userId: string, username: string): string {
+  return jwt.sign(
+    { userId, username, jti: randomBytes(16).toString('hex') },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  )
+}
+
+// requireAuth only verifies the JWT, so the session row is bookkeeping for the
+// "active sessions" view. Never let a failed insert block a login.
+async function persistSession(data: { userId: string; token: string; deviceInfo?: string }) {
+  try {
+    await (prisma as any).authSession.create({
+      data: {
+        userId: data.userId,
+        token: data.token,
+        deviceInfo: data.deviceInfo || 'unknown',
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    })
+  } catch (err: any) {
+    console.warn('authSession.create failed (login still valid):', err?.message ?? err)
+  }
+}
+
 // POST /api/auth/register
 app.post('/auth/register', async (c) => {
   const body = await c.req.json().catch(() => ({}))
@@ -203,10 +233,8 @@ app.post('/auth/register', async (c) => {
     data: { username: name, passwordHash }
   })
 
-  const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' })
-  await (prisma as any).authSession.create({
-    data: { userId: user.id, token, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }
-  })
+  const token = newSessionToken(user.id, user.username)
+  await persistSession({ userId: user.id, token })
   await (prisma as any).activityLog.create({ data: { action: 'register', details: `New account created: ${name}`, surface: 'auth' } }).catch(() => {})
 
   return c.json({ token, user: { id: user.id, username: user.username, twoFactorEnabled: user.twoFactorEnabled } })
@@ -276,10 +304,8 @@ app.post('/auth/login', async (c) => {
     return c.json({ requires2fa: true, tempToken, user: { id: user.id, username: user.username } })
   }
 
-  const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' })
-  await (prisma as any).authSession.create({
-    data: { userId: user.id, token, deviceInfo: deviceInfo || 'unknown', expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }
-  })
+  const token = newSessionToken(user.id, user.username)
+  await persistSession({ userId: user.id, token, deviceInfo })
   await (prisma as any).activityLog.create({ data: { action: 'login', details: `User ${username} logged in`, surface: 'auth' } })
 
   return c.json({ token, user: { id: user.id, username: user.username, twoFactorEnabled: false } })
@@ -345,10 +371,8 @@ app.post('/auth/2fa/verify-login', async (c) => {
   const isValid = verifyOtp({ token, secret: user.twoFactorSecret })
   if (!isValid) return c.json({ error: 'Invalid code' }, 401)
 
-  const authToken = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' })
-  await (prisma as any).authSession.create({
-    data: { userId: user.id, token: authToken, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }
-  })
+  const authToken = newSessionToken(user.id, user.username)
+  await persistSession({ userId: user.id, token: authToken })
 
   return c.json({ token: authToken, user: { id: user.id, username: user.username, twoFactorEnabled: true } })
 })
